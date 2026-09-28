@@ -4,8 +4,9 @@ Relevance scoring for nearby/offset wells.
 Calculates a composite relevance score for each nearby well relative to the
 active well, considering:
   - Spatial proximity (distance)
+  - Spatial proximity (distance)
   - Depth similarity (current_depth)
-  - Formation match
+  - Formation match (based on historical events in the well matching active formation)
   - Historical event density near the upcoming interval
 
 The score is transparent and explainable — each component is returned separately.
@@ -39,8 +40,12 @@ def _depth_score(active_depth: float, well_depth: float) -> float:
     return max(0.0, 1.0 - diff / 500.0)
 
 
-def _formation_score(active_formation: str, well_formation: str) -> float:
-    return 1.0 if active_formation == well_formation else 0.0
+def _formation_score(active_formation: str, events: list) -> float:
+    """Bonus if the offset well had events in the active well's current formation."""
+    if not events:
+        return 0.0
+    matching = sum(1 for e in events if e.formation == active_formation)
+    return min(1.0, matching / 2.0)
 
 
 def _event_density_score(events: list, active_depth: float) -> float:
@@ -66,7 +71,7 @@ def compute_relevance(
 ) -> schemas.RelevanceBreakdown:
     sp = _spatial_score(distance_km, radius_km)
     dp = _depth_score(active_well.current_depth, offset_well.current_depth)
-    fm = _formation_score(active_well.current_formation, offset_well.formation)
+    fm = _formation_score(active_well.current_formation, events)
     ev = _event_density_score(events, active_well.current_depth)
 
     overall = (
@@ -97,6 +102,13 @@ def get_nearby_wells_with_relevance(
         return []
 
     all_wells = db.query(models.Well).filter(models.Well.well_id != active_well_id).all()
+    
+    # Bulk fetch events to prevent N+1 queries
+    all_well_ids = [w.well_id for w in all_wells]
+    all_events = db.query(models.WellEvent).filter(models.WellEvent.well_id.in_(all_well_ids)).all()
+    events_by_well = {}
+    for e in all_events:
+        events_by_well.setdefault(e.well_id, []).append(e)
 
     results: List[schemas.NearbyWellResponse] = []
     for well in all_wells:
@@ -108,7 +120,7 @@ def get_nearby_wells_with_relevance(
         if dist_km > radius_km:
             continue
 
-        events_orm = db.query(models.WellEvent).filter(models.WellEvent.well_id == well.well_id).all()
+        events_orm = events_by_well.get(well.well_id, [])
         events_schema = [schemas.WellEvent.from_orm(e) for e in events_orm]
 
         relevance = compute_relevance(active_well, well, dist_km, radius_km, events_orm)

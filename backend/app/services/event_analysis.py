@@ -38,7 +38,7 @@ def derive_historical_risk_zones(
     min_supporting_wells: int = 2,
 ) -> List[schemas.HistoricalRiskZone]:
     """
-    Build historical risk zones by clustering nearby-well events of the same type
+    Build historical risk zones by clustering nearby-well events of the same type and formation
     that occur within CLUSTER_BAND_M of each other.
 
     Only zones supported by ≥ min_supporting_wells are surfaced.
@@ -47,16 +47,17 @@ def derive_historical_risk_zones(
     if not active_well:
         return []
 
-    # Gather all events from nearby wells grouped by event_type
-    events_by_type: Dict[str, list] = {}
+    events_by_key: Dict[str, list] = {}
     for nw in nearby_responses:
         for evt in nw.relevant_events:
-            events_by_type.setdefault(evt.event_type, []).append(evt)
+            key = f"{evt.event_type}::{evt.formation}"
+            events_by_key.setdefault(key, []).append(evt)
 
     zones: List[schemas.HistoricalRiskZone] = []
     seen_zone_ids: set = set()
 
-    for event_type, evts in events_by_type.items():
+    for key, evts in events_by_key.items():
+        event_type = key.split("::")[0]
         clusters = _cluster_events(evts, CLUSTER_BAND_M)
         for cluster in clusters:
             well_ids = list({e.well_id for e in cluster})
@@ -78,12 +79,14 @@ def derive_historical_risk_zones(
             formation = cluster[0].formation if cluster else active_well.current_formation
 
             # Human-readable explanation
-            depth_above = active_well.current_depth - zone_end
-            proximity_txt = (
-                f"Active well is {abs(depth_above):.0f} m {'above' if depth_above > 0 else 'inside or below'} this zone."
-                if depth_above >= -10 else
-                f"Active well is {abs(depth_above):.0f} m inside this zone."
-            )
+            current = active_well.current_depth
+            if current < zone_start - 10:
+                proximity_txt = f"Active well is {zone_start - current:.0f} m above this historical risk zone."
+            elif zone_start - 10 <= current <= zone_end + 10:
+                proximity_txt = f"Active well is currently inside (or immediately approaching) this zone."
+            else:
+                proximity_txt = f"Active well is {current - zone_end:.0f} m below this historical risk zone."
+                
             explanation = (
                 f"{len(cluster)} event(s) of type {event_type.replace('_', ' ')} were recorded "
                 f"in {len(well_ids)} nearby well(s) between {zone_start:.0f}–{zone_end:.0f} m "

@@ -64,20 +64,21 @@ def generate_alerts(
         else:
             continue
 
-        # Source documents from supporting events
+        # Source documents and historical mitigation from supporting events
         source_docs: List[str] = []
+        historical_mitigations: List[str] = []
+        
         for nw in nearby:
             for evt in nw.relevant_events:
-                if evt.event_id in zone.supporting_event_ids and evt.source_document:
-                    if evt.source_document not in source_docs:
-                        source_docs.append(
-                            f"{evt.source_document}"
-                            + (f" p.{evt.source_page}" if evt.source_page else "")
-                        )
+                if evt.event_id in zone.supporting_event_ids:
+                    if evt.source_document:
+                        doc_str = f"{evt.source_document}" + (f" p.{evt.source_page}" if evt.source_page else "")
+                        if doc_str not in source_docs:
+                            source_docs.append(doc_str)
+                    if evt.mitigation and evt.mitigation not in historical_mitigations:
+                        historical_mitigations.append(evt.mitigation)
 
-        # Recommended mitigation from most common event type in zone
-        from .risk_engine import MITIGATIONS_BY_TYPE
-        rec_mit = MITIGATIONS_BY_TYPE.get(zone.risk_type)
+        rec_mit = "Historical mitigation observed in supporting wells: " + " | ".join(historical_mitigations[:2]) if historical_mitigations else None
 
         alerts.append(schemas.Alert(
             alert_id=str(uuid.uuid4())[:8],

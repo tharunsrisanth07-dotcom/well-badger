@@ -116,7 +116,7 @@ const DrillingParticles = () => {
 //  OVERVIEW SECTION (REDESIGNED)
 // ════════════════════════════════════════════════════════════════════════════════
 function OverviewSection({
-  activeWell, simDepth, stats, risks, alerts, nearbyWells, riskZones,
+  activeWell, simDepth, stats, risks, alerts, nearbyWells, riskZones, radius
 }: {
   activeWell: Well | null; simDepth: number; stats: SystemStats | null;
   risks: RiskPrediction[]; alerts: Alert[];
@@ -192,7 +192,7 @@ function OverviewSection({
             <MapContainer center={[activeWell.latitude, activeWell.longitude]} zoom={12} style={{ width: '100%', height: '100%' }}>
               <TileLayer url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png" attribution="" />
               <FlyTo lat={activeWell.latitude} lon={activeWell.longitude} />
-              <Circle center={[activeWell.latitude, activeWell.longitude]} radius={10000} pathOptions={{ color: 'var(--blue)', fillColor: 'var(--blue)', fillOpacity: 0.05, dashArray: '6 4' }} />
+              <Circle center={[activeWell.latitude, activeWell.longitude]} radius={radius * 1000} pathOptions={{ color: 'var(--blue)', fillColor: 'var(--blue)', fillOpacity: 0.05, dashArray: '6 4' }} />
               <Marker position={[activeWell.latitude, activeWell.longitude]} icon={ACTIVE_ICON} />
               {nearbyWells.map(nw => (
                 <Marker key={nw.well.well_id} position={[nw.well.latitude, nw.well.longitude]} icon={nw.relevance.label === 'HIGH' ? HIGH_ICON : nw.relevance.label === 'MEDIUM' ? MED_ICON : LOW_ICON} />
@@ -610,6 +610,7 @@ export default function App() {
   const [stats, setStats] = useState<SystemStats | null>(null);
   const [allWells, setAllWells] = useState<Well[]>([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   // Mouse spotlight tracker
   useEffect(() => {
@@ -638,20 +639,30 @@ export default function App() {
     }
   }, [activeWellId, activeWells]);
 
-  const refresh = useCallback(async (depth = simDepth) => {
+  const refresh = useCallback(async (depth = simDepth, partial = false) => {
     setLoading(true);
+    setError(null);
     try {
-      const [nw, rs, al, rz, evts, st, ws] = await Promise.all([
+      const p: Promise<any>[] = [
         getNearbyWells(activeWellId, radius),
         getCurrentRisk(activeWellId, radius, depth),
         getAlerts(activeWellId, radius, depth),
         getRiskZones(activeWellId, radius),
-        getAllEvents({ limit: 50 }),
-        getSystemStats(),
-        import('./api').then(m => m.getWells()),
-      ]);
-      setNearbyWells(nw); setRisks(rs); setAlerts(al); setRiskZones(rz); setEvents(evts); setStats(st); setAllWells(ws);
-    } catch (e) { console.error(e); }
+      ];
+      if (!partial) {
+        p.push(getAllEvents({ limit: 50 }), getSystemStats(), import('./api').then(m => m.getWells()));
+      }
+      
+      const res = await Promise.all(p);
+      setNearbyWells(res[0]); setRisks(res[1]); setAlerts(res[2]); setRiskZones(res[3]);
+      
+      if (!partial) {
+        setEvents(res[4]); setStats(res[5]); setAllWells(res[6]);
+      }
+    } catch (e: any) { 
+      console.error(e); 
+      setError(e.message || "Failed to communicate with the intelligence feed.");
+    }
     finally { setLoading(false); }
   }, [activeWellId, radius, simDepth]);
 
@@ -661,7 +672,7 @@ export default function App() {
   const onDepthChange = (d: number) => {
     setSimDepth(d);
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => refresh(d), 400);
+    debounceRef.current = setTimeout(() => refresh(d, true), 400);
   };
 
   return (
@@ -717,16 +728,22 @@ export default function App() {
         </header>
 
         <main className="page">
-          <div className="page-content">
-            {section === 'overview' && (
-              <OverviewSection activeWell={activeWell} simDepth={simDepth} stats={stats} risks={risks} alerts={alerts} nearbyWells={nearbyWells} riskZones={riskZones} />
-            )}
+          {error ? (
+            <div className="page-content" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <EmptyState icon={TriangleAlert} msg={`System Error: ${error}`} />
+            </div>
+          ) : (
+            <div className="page-content">
+              {section === 'overview' && (
+                <OverviewSection activeWell={activeWell} simDepth={simDepth} stats={stats} risks={risks} alerts={alerts} nearbyWells={nearbyWells} riskZones={riskZones} radius={radius} />
+              )}
             {section === 'map' && <MapSection activeWell={activeWell} nearbyWells={nearbyWells} radius={radius} onRadiusChange={setRadius} />}
             {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} alerts={alerts} />}
             {section === 'wells' && <WellsSection wells={allWells} />}
             {section === 'knowledge' && <KnowledgeSection events={events} />}
             {section === 'search' && <SearchSection activeWellId={activeWellId} />}
-          </div>
+            </div>
+          )}
         </main>
       </div>
     </div>

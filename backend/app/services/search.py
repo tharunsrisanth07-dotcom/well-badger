@@ -41,10 +41,21 @@ SEVERITY_ALIASES = {
 FORMATION_NAMES = ["tipam", "barail", "kopili", "sylhet"]
 
 
-def _extract_depth(query: str) -> Optional[float]:
-    """Extract depth in metres from query text."""
-    m = re.search(r"(\d{3,4})\s*m?\b", query)
-    return float(m.group(1)) if m else None
+def _extract_depth(query: str) -> Optional[tuple[float, float]]:
+    """Extract depth or depth range in metres from query text. e.g. 2900m or 2800-3000m"""
+    ql = query.lower()
+    # match range e.g. 2800-3000 m or 2800 to 3000 m
+    m_range = re.search(r"(\d{3,5})\s*(?:-|to)\s*(\d{3,5})\s*m\b", ql)
+    if m_range:
+        return (float(m_range.group(1)), float(m_range.group(2)))
+    
+    # match specific depth e.g. 2900 m, near 2900m
+    m_single = re.search(r"(\d{3,5})\s*m\b", ql)
+    if m_single:
+        d = float(m_single.group(1))
+        return (d - 100, d + 100)
+        
+    return None
 
 
 def _extract_event_type(query: str) -> Optional[str]:
@@ -114,8 +125,8 @@ def search_knowledge(
         q = q.filter(models.WellEvent.formation == formation)
     if depth_target:
         q = q.filter(
-            models.WellEvent.depth >= depth_target - 100,
-            models.WellEvent.depth <= depth_target + 100,
+            models.WellEvent.depth >= depth_target[0],
+            models.WellEvent.depth <= depth_target[1],
         )
 
     all_events = q.order_by(models.WellEvent.depth).limit(limit * 3).all()
@@ -125,11 +136,33 @@ def search_knowledge(
     if active_well_id:
         active_well = db.query(models.Well).filter(models.Well.well_id == active_well_id).first()
 
+    # Bulk fetch wells for N+1 prevention
+    well_ids = list({e.well_id for e in all_events})
+    all_wells_q = db.query(models.Well).filter(models.Well.well_id.in_(well_ids)).all()
+    wells_map = {w.well_id: w for w in all_wells_q}
+
     results: List[schemas.SearchResult] = []
     seen_ids = set()
     for evt in all_events:
         if evt.event_id in seen_ids:
             continue
+
+        w_obj = wells_map.get(evt.well_id)
+        if not w_obj:
+            continue
+
+        # Distance from active well & Radius filtering
+        dist_km = None
+        if active_well:
+            dist_km = round(haversine(
+                (active_well.latitude, active_well.longitude),
+                (w_obj.latitude, w_obj.longitude),
+                unit=Unit.KILOMETERS,
+            ), 2)
+            # Strict radius exclusion
+            if dist_km > radius_km:
+                continue
+                
         seen_ids.add(evt.event_id)
 
         # Relevance score
@@ -138,30 +171,17 @@ def search_knowledge(
             score += 0.2
         if formation and evt.formation == formation:
             score += 0.15
-        if depth_target and abs(evt.depth - depth_target) < 50:
+        if depth_target and depth_target[0] <= evt.depth <= depth_target[1]:
             score += 0.15
         if severity and evt.severity == severity:
             score += 0.1
-
-        # Distance from active well
-        dist_km = None
-        if active_well:
-            w = db.query(models.Well).filter(models.Well.well_id == evt.well_id).first()
-            if w:
-                dist_km = round(haversine(
-                    (active_well.latitude, active_well.longitude),
-                    (w.latitude, w.longitude),
-                    unit=Unit.KILOMETERS,
-                ), 2)
-                if dist_km <= radius_km:
-                    score += 0.1
+        if dist_km is not None and dist_km <= radius_km / 2:
+            score += 0.1
 
         highlight = (
             f"{evt.event_type.replace('_', ' ')} at {evt.depth:.0f} m ({evt.formation}) — "
             f"{evt.severity} severity. Source: {evt.source_document}"
         )
-
-        w_obj = db.query(models.Well).filter(models.Well.well_id == evt.well_id).first()
 
         results.append(schemas.SearchResult(
             result_type="event",

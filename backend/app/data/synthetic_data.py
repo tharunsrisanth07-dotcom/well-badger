@@ -5,6 +5,7 @@ Deterministic (fixed seed) — produces consistent demo patterns for Assam oil-f
 SYNTHETIC / DEMO DATA — not real drilling records.
 """
 import random
+import argparse
 from datetime import datetime, timedelta
 
 from ..database import engine, SessionLocal
@@ -12,6 +13,7 @@ from ..models import models
 
 # ── Fixed seed for reproducibility ────────────────────────────────────────────
 RNG = random.Random(42)
+SYNTHETIC_REFERENCE_DATE = datetime(2026, 1, 1)
 
 # ── Lookup tables ─────────────────────────────────────────────────────────────
 FIELDS     = ["Dibrugarh", "Tinsukia", "Moran"]
@@ -84,7 +86,7 @@ BASE_LON = 94.91
 
 
 def _rand_date(days_back_min=60, days_back_max=2500):
-    return datetime.now() - timedelta(days=RNG.randint(days_back_min, days_back_max))
+    return SYNTHETIC_REFERENCE_DATE - timedelta(days=RNG.randint(days_back_min, days_back_max))
 
 
 def _formation_for_depth(depth: float) -> str:
@@ -125,8 +127,9 @@ def _make_event(
     out_tmpl = RNG.choice(OUTCOMES)
     outcome = _fmt_desc(out_tmpl, hrs=hrs, ret=ret)
 
-    year = RNG.randint(2012, 2024)
-    doc_type = RNG.choice(["DDR", "WCR", "MUD_RPT"])
+    date = _rand_date()
+    year = date.year
+    doc_type = RNG.choice(["DDR", "WCR", "MUD_REPORT", "COMPLETION"])
     page = RNG.randint(3, 45)
 
     return models.WellEvent(
@@ -139,7 +142,7 @@ def _make_event(
         cause=cause,
         mitigation=mit,
         outcome=outcome,
-        date=_rand_date(),
+        date=date,
         source_document=f"{doc_type}_{well_id}_{year}.pdf",
         source_page=page,
     )
@@ -167,7 +170,7 @@ def _make_drilling_params(well_id: str, max_depth: float, n: int = 40) -> list[m
             pressure=round(RNG.uniform(3200, 5200), 1),
             flow_rate=round(RNG.uniform(320, 750), 1),
             mud_weight=round(RNG.uniform(1.08, 1.42), 3),
-            timestamp=datetime.now() - timedelta(hours=n - i),
+            timestamp=SYNTHETIC_REFERENCE_DATE - timedelta(hours=n - i),
         ))
     return params
 
@@ -175,7 +178,12 @@ def _make_drilling_params(well_id: str, max_depth: float, n: int = 40) -> list[m
 def _make_document(well_id: str, event: models.WellEvent, idx: int = 0) -> models.Document:
     """Create a synthetic DDR entry consistent with a specific event."""
     year = event.date.year if event.date else 2020
-    doc_type = event.source_document.split("_")[0] if event.source_document else "DDR"
+    doc_parts = event.source_document.split("_") if event.source_document else []
+    # If the prefix is something like MUD_REPORT, handle it:
+    if len(doc_parts) > 2 and doc_parts[0] == "MUD" and doc_parts[1] == "REPORT":
+        doc_type = "MUD_REPORT"
+    else:
+        doc_type = doc_parts[0] if doc_parts else "DDR"
     doc_id = f"DOC-{well_id}-{event.event_type[:3]}-{year}-{idx}"
     text = (
         f"[SYNTHETIC DEMO DOCUMENT]\n\n"
@@ -199,7 +207,7 @@ def _make_document(well_id: str, event: models.WellEvent, idx: int = 0) -> model
         well_id=well_id,
         filename=event.source_document or f"DDR_{well_id}_{year}.pdf",
         document_type=doc_type,
-        date=event.date or datetime.now() - timedelta(days=365),
+        date=event.date or SYNTHETIC_REFERENCE_DATE - timedelta(days=365),
         text=text,
         processing_status="PROCESSED",
     )
@@ -207,12 +215,16 @@ def _make_document(well_id: str, event: models.WellEvent, idx: int = 0) -> model
 
 # ── Main generator ────────────────────────────────────────────────────────────
 
-def generate_synthetic_data():
+def generate_synthetic_data(reset=False):
+    if reset:
+        models.Base.metadata.drop_all(bind=engine)
+    
     models.Base.metadata.create_all(bind=engine)
     db = SessionLocal()
 
-    if db.query(models.Well).count() > 0:
+    if not reset and db.query(models.Well).count() > 0:
         db.close()
+        print("[NWIS] Database already initialized. Use --reset to overwrite.")
         return
 
     wells, events, params, docs = [], [], [], []
@@ -269,7 +281,7 @@ def generate_synthetic_data():
         current_depth=2850.0,      # <-- Currently at 2850 m
         current_formation="Barail",
         formation="Barail",
-        spud_date=datetime.now() - timedelta(days=45),
+        spud_date=SYNTHETIC_REFERENCE_DATE - timedelta(days=45),
     )
     wells.append(active1)
     params.extend(_make_drilling_params("ACTIVE-001", 2850.0, n=60))
@@ -286,7 +298,7 @@ def generate_synthetic_data():
         current_depth=1640.0,      # Shallower — in Tipam
         current_formation="Tipam",
         formation="Tipam",
-        spud_date=datetime.now() - timedelta(days=28),
+        spud_date=SYNTHETIC_REFERENCE_DATE - timedelta(days=28),
     )
     wells.append(active2)
     params.extend(_make_drilling_params("ACTIVE-002", 1640.0, n=40))
@@ -346,4 +358,7 @@ def generate_synthetic_data():
 
 
 if __name__ == "__main__":
-    generate_synthetic_data()
+    parser = argparse.ArgumentParser(description="Generate synthetic data for NWIS")
+    parser.add_argument("--reset", action="store_true", help="Drop existing tables and recreate data")
+    args = parser.parse_args()
+    generate_synthetic_data(reset=args.reset)

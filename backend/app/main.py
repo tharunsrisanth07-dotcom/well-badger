@@ -2,6 +2,7 @@ from fastapi import FastAPI, Depends, HTTPException, Query, Body
 from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy.orm import Session
 from typing import List, Optional
+import os
 
 from . import database
 from .models import models, schemas
@@ -17,9 +18,12 @@ app = FastAPI(
     version="2.0.0",
 )
 
+cors_origins_env = os.getenv("NWIS_CORS_ORIGINS", "http://localhost:5173")
+origins = [origin.strip() for origin in cors_origins_env.split(",") if origin.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],

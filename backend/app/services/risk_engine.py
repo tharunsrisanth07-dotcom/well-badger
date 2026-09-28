@@ -35,13 +35,7 @@ RISK_TYPES = ["MUD_LOSS", "STUCK_PIPE", "KICK", "TORQUE_SPIKE", "CEMENTING_ISSUE
 
 SEVERITY_WEIGHTS = {"CRITICAL": 1.0, "HIGH": 0.75, "MEDIUM": 0.45, "LOW": 0.20}
 
-MITIGATIONS_BY_TYPE = {
-    "MUD_LOSS":        "Pump LCM pill; reduce ECD by lowering flow rate. Monitor pit levels.",
-    "STUCK_PIPE":      "Work pipe with rotation/reciprocation. Spot oil-based spotting fluid.",
-    "KICK":            "Increase mud weight to balance pore pressure. Verify BOP function.",
-    "TORQUE_SPIKE":    "Reduce WOB and RPM. Ream to bottom at lower parameters.",
-    "CEMENTING_ISSUE": "Ensure adequate centralisation. Conduct cement bond logging after job.",
-}
+
 
 UPCOMING_WINDOW_M = 100.0   # Look ahead this many metres from current_depth
 ZONE_MATCH_PAD_M  = 20.0    # Events within ±20 m of upcoming window boundary count
@@ -149,8 +143,8 @@ def analyze_risk(
         n_events = len(data["events"])
         raw_score = data["raw"]
 
-        # Normalise to 0–100; cap at 95 to avoid absolute certainty claims
-        score = min(95.0, raw_score)
+        # Normalise to 0–100 with diminishing returns to avoid instant 95/100 from repeated events
+        score = min(95.0, 25.0 + (raw_score ** 0.85) * 1.5)
 
         level   = _risk_level(score)
         ev_str  = _evidence_label(n_wells, n_events)
@@ -191,6 +185,13 @@ def analyze_risk(
             f"events in similar geological conditions. {zone_txt}"
         )
 
+        # Extract historical mitigations
+        historical_mits = []
+        for e in data["events"]:
+            if e.mitigation and e.mitigation not in historical_mits:
+                historical_mits.append(e.mitigation)
+        rec_mit = "Historical mitigation observed: " + " | ".join(historical_mits[:2]) if historical_mits else None
+
         predictions.append(schemas.RiskPrediction(
             risk_type=rt,
             risk_score=round(score, 1),
@@ -203,7 +204,7 @@ def analyze_risk(
             contributing_factors=factors,
             historical_zone=zone,
             explanation=explanation,
-            recommended_mitigation=MITIGATIONS_BY_TYPE.get(rt),
+            recommended_mitigation=rec_mit,
         ))
 
     predictions.sort(key=lambda p: p.risk_score, reverse=True)
