@@ -1,85 +1,210 @@
-from typing import List, Dict, Any
-from sqlalchemy.orm import Session
-from ..models import models, schemas
+"""
+Historical Similarity Risk Engine — NWIS
 
-def analyze_risk(db: Session, active_well_id: str, radius_km: float = 10.0) -> List[schemas.RiskPrediction]:
-    # Import here to avoid circular imports if any
-    from .geospatial import get_nearby_wells
-    
-    nearby_wells = get_nearby_wells(db, active_well_id, radius_km)
+NOT a machine-learning model. This is an evidence-based risk engine that
+scores drilling risks using historical patterns from nearby/offset wells.
+
+Clearly labelled as "Historical Similarity Risk Engine" in all outputs.
+
+Risk scoring inputs:
+  - Distance to supporting well (closer = higher weight)
+  - Formation match (same formation = significant bonus)
+  - Depth proximity to upcoming interval
+  - Number of events / supporting wells
+  - Event severity
+  - Time recency of events (more recent = slightly higher weight)
+
+Outputs per risk type:
+  - risk_score: 0–100 (bounded)
+  - risk_level: LOW | MEDIUM | HIGH | CRITICAL
+  - evidence_strength: Weak | Moderate | Strong | Very Strong
+  - contributing_factors: transparent breakdown
+  - explanation: 1-2 sentence human-readable rationale
+  - historical_zone: derived from event_analysis
+"""
+from typing import List, Dict
+from datetime import datetime
+from sqlalchemy.orm import Session
+
+from ..models import models, schemas
+from . import relevance as rel_svc
+from .event_analysis import derive_historical_risk_zones
+
+# ── Look-up tables ─────────────────────────────────────────────────────────────
+RISK_TYPES = ["MUD_LOSS", "STUCK_PIPE", "KICK", "TORQUE_SPIKE", "CEMENTING_ISSUE"]
+
+SEVERITY_WEIGHTS = {"CRITICAL": 1.0, "HIGH": 0.75, "MEDIUM": 0.45, "LOW": 0.20}
+
+MITIGATIONS_BY_TYPE = {
+    "MUD_LOSS":        "Pump LCM pill; reduce ECD by lowering flow rate. Monitor pit levels.",
+    "STUCK_PIPE":      "Work pipe with rotation/reciprocation. Spot oil-based spotting fluid.",
+    "KICK":            "Increase mud weight to balance pore pressure. Verify BOP function.",
+    "TORQUE_SPIKE":    "Reduce WOB and RPM. Ream to bottom at lower parameters.",
+    "CEMENTING_ISSUE": "Ensure adequate centralisation. Conduct cement bond logging after job.",
+}
+
+UPCOMING_WINDOW_M = 100.0   # Look ahead this many metres from current_depth
+ZONE_MATCH_PAD_M  = 20.0    # Events within ±20 m of upcoming window boundary count
+
+
+def _evidence_label(n_wells: int, n_events: int) -> str:
+    if n_wells >= 4 or n_events >= 6:
+        return "Very Strong"
+    if n_wells >= 3 or n_events >= 4:
+        return "Strong"
+    if n_wells >= 2 or n_events >= 2:
+        return "Moderate"
+    return "Weak"
+
+
+def _risk_level(score: float) -> str:
+    if score >= 75:
+        return "CRITICAL"
+    if score >= 55:
+        return "HIGH"
+    if score >= 30:
+        return "MEDIUM"
+    return "LOW"
+
+
+def analyze_risk(
+    db: Session,
+    active_well_id: str,
+    radius_km: float = 10.0,
+    current_depth_override: float | None = None,
+) -> List[schemas.RiskPrediction]:
+    """
+    Analyse drilling risk for the active well based on historical offset-well data.
+
+    current_depth_override: if provided, use this depth instead of the stored value
+    (supports the POC depth-simulation feature).
+    """
     active_well = db.query(models.Well).filter(models.Well.well_id == active_well_id).first()
-    
     if not active_well:
         return []
-        
-    # Analyze the upcoming 100m interval
-    upcoming_start = active_well.total_depth
-    upcoming_end = active_well.total_depth + 100
-    
-    # We will score risks based on:
-    # 1. Did the event occur in a nearby well?
-    # 2. Was it in the same formation?
-    # 3. Did it occur near the upcoming depth interval (within +/- 50m of upcoming start/end)?
-    
-    risk_scores = {
-        "MUD_LOSS": {"score": 0, "events": [], "wells": set()},
-        "STUCK_PIPE": {"score": 0, "events": [], "wells": set()},
-        "TORQUE_SPIKE": {"score": 0, "events": [], "wells": set()},
-        "KICK": {"score": 0, "events": [], "wells": set()},
-        "CEMENTING_ISSUE": {"score": 0, "events": [], "wells": set()},
+
+    # Use overridden depth if provided (simulation mode)
+    current_depth = current_depth_override if current_depth_override is not None else active_well.current_depth
+    upcoming_start = current_depth
+    upcoming_end   = current_depth + UPCOMING_WINDOW_M
+
+    # Get nearby wells with relevance scores
+    nearby = rel_svc.get_nearby_wells_with_relevance(db, active_well_id, radius_km)
+
+    # Derive historical risk zones
+    risk_zones = derive_historical_risk_zones(db, active_well_id, nearby, min_supporting_wells=2)
+    zone_by_type = {z.risk_type: z for z in risk_zones}
+
+    # Accumulate raw signals per risk type
+    accum: Dict[str, Dict] = {
+        rt: {"raw": 0.0, "events": [], "wells": set(), "factors": []}
+        for rt in RISK_TYPES
     }
-    
-    for well_response in nearby_wells:
-        for event in well_response.relevant_events:
-            # Check depth proximity
-            depth_match = (upcoming_start - 50) <= event.depth <= (upcoming_end + 50)
-            formation_match = event.formation == active_well.formation
-            
-            if depth_match or formation_match:
-                # Base score for just happening
-                score_increment = 10
-                
-                # Bonus for formation match
-                if formation_match:
-                    score_increment += 15
-                    
-                # Bonus for depth match
-                if depth_match:
-                    score_increment += 20
-                
-                # Distance penalty
-                dist_penalty = (well_response.distance_km / radius_km) * 10
-                score_increment = max(5, score_increment - dist_penalty)
-                
-                if event.event_type in risk_scores:
-                    risk_scores[event.event_type]["score"] += score_increment
-                    risk_scores[event.event_type]["events"].append(event)
-                    risk_scores[event.event_type]["wells"].add(well_response.well.well_id)
-                    
-    predictions = []
-    
-    for r_type, data in risk_scores.items():
-        # Normalize score to max 100 roughly, just for demonstration
-        final_score = min(100.0, data["score"])
-        if final_score > 0:
-            level = "LOW"
-            if final_score > 70:
-                level = "HIGH"
-            elif final_score > 40:
-                level = "MEDIUM"
-                
-            predictions.append(schemas.RiskPrediction(
-                risk_type=r_type,
-                score=round(final_score, 1),
-                level=level,
-                interval_start=upcoming_start,
-                interval_end=upcoming_end,
-                confidence=min(100.0, len(data["wells"]) * 25.0), # 4 wells gives 100% confidence
-                evidence=[f"{len(data['wells'])} nearby wells encountered {r_type.replace('_', ' ').lower()} in similar conditions."],
-                supporting_wells=list(data["wells"])
+
+    for nw in nearby:
+        for evt in nw.relevant_events:
+            rt = evt.event_type
+            if rt not in accum:
+                continue
+
+            sev_w = SEVERITY_WEIGHTS.get(evt.severity, 0.3)
+
+            # Formation match bonus
+            fm_match = (evt.formation == active_well.current_formation)
+            fm_bonus = 0.20 if fm_match else 0.0
+
+            # Depth proximity scoring
+            depth_in_window = (upcoming_start - ZONE_MATCH_PAD_M) <= evt.depth <= (upcoming_end + ZONE_MATCH_PAD_M)
+            depth_within_150 = abs(evt.depth - current_depth) <= 150
+            depth_bonus = 0.0
+            if depth_in_window:
+                depth_bonus = 0.30
+            elif depth_within_150:
+                depth_bonus = 0.15
+
+            # Distance (spatial relevance inverse — nw.relevance.spatial_score is already 0-1)
+            spatial_w = nw.relevance.spatial_score
+
+            # Recency bonus (events <3 years old get slight bump)
+            try:
+                days_ago = (datetime.now() - evt.date).days if evt.date else 3650
+            except Exception:
+                days_ago = 3650
+            recency_w = 1.0 if days_ago < 1095 else 0.85
+
+            # Combined contribution for this event
+            contribution = (sev_w + fm_bonus + depth_bonus) * spatial_w * recency_w * 20.0
+
+            accum[rt]["raw"] += contribution
+            accum[rt]["events"].append(evt)
+            accum[rt]["wells"].add(nw.well.well_id)
+
+    predictions: List[schemas.RiskPrediction] = []
+
+    for rt, data in accum.items():
+        if data["raw"] <= 0:
+            continue
+
+        n_wells  = len(data["wells"])
+        n_events = len(data["events"])
+        raw_score = data["raw"]
+
+        # Normalise to 0–100; cap at 95 to avoid absolute certainty claims
+        score = min(95.0, raw_score)
+
+        level   = _risk_level(score)
+        ev_str  = _evidence_label(n_wells, n_events)
+
+        # Build contributing factors
+        factors: List[schemas.ContributingFactor] = []
+        if n_wells > 0:
+            factors.append(schemas.ContributingFactor(
+                factor="Supporting offset wells",
+                detail=f"{n_wells} nearby well(s) recorded {rt.replace('_', ' ').lower()} events",
+                weight=round(n_wells / max(1, n_wells + 2), 2),
             ))
-            
-    # Sort by score descending
-    predictions.sort(key=lambda x: x.score, reverse=True)
-    
+        depth_evts = [e for e in data["events"]
+                      if (upcoming_start - ZONE_MATCH_PAD_M) <= e.depth <= (upcoming_end + ZONE_MATCH_PAD_M)]
+        if depth_evts:
+            factors.append(schemas.ContributingFactor(
+                factor="Depth proximity",
+                detail=f"{len(depth_evts)} event(s) within the upcoming {upcoming_start:.0f}–{upcoming_end:.0f} m interval",
+                weight=0.30,
+            ))
+        fm_evts = [e for e in data["events"] if e.formation == active_well.current_formation]
+        if fm_evts:
+            factors.append(schemas.ContributingFactor(
+                factor="Formation match",
+                detail=f"{len(fm_evts)} event(s) in same formation ({active_well.current_formation})",
+                weight=0.25,
+            ))
+
+        # Explanation text
+        zone = zone_by_type.get(rt)
+        if zone:
+            zone_txt = f"A historical risk zone is identified at {zone.interval_start:.0f}–{zone.interval_end:.0f} m."
+        else:
+            zone_txt = f"Events were recorded near the upcoming {upcoming_start:.0f}–{upcoming_end:.0f} m interval."
+
+        explanation = (
+            f"{n_wells} nearby offset well(s) experienced {rt.replace('_', ' ').lower()} "
+            f"events in similar geological conditions. {zone_txt}"
+        )
+
+        predictions.append(schemas.RiskPrediction(
+            risk_type=rt,
+            risk_score=round(score, 1),
+            risk_level=level,
+            interval_start=zone.interval_start if zone else upcoming_start,
+            interval_end=zone.interval_end if zone else upcoming_end,
+            evidence_strength=ev_str,
+            supporting_wells=list(data["wells"]),
+            supporting_events=[e.event_id for e in data["events"]],
+            contributing_factors=factors,
+            historical_zone=zone,
+            explanation=explanation,
+            recommended_mitigation=MITIGATIONS_BY_TYPE.get(rt),
+        ))
+
+    predictions.sort(key=lambda p: p.risk_score, reverse=True)
     return predictions

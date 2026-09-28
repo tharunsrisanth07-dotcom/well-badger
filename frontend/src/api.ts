@@ -1,8 +1,8 @@
 import axios from 'axios';
 
-const API_URL = 'http://localhost:8000/api';
+const API = 'http://localhost:8000/api';
 
-// ── Types ─────────────────────────────────────────────────────────────────────
+// ── Core types ────────────────────────────────────────────────────────────────
 
 export interface Well {
   well_id: string;
@@ -12,7 +12,10 @@ export interface Well {
   longitude: number;
   status: string;
   total_depth: number;
+  current_depth: number;
+  current_formation: string;
   formation: string;
+  spud_date?: string | null;
 }
 
 export interface WellEvent {
@@ -28,23 +31,89 @@ export interface WellEvent {
   outcome: string;
   date: string;
   source_document: string;
+  source_page?: number | null;
 }
 
-export interface RiskPrediction {
-  risk_type: string;
-  score: number;
-  level: string;
-  interval_start: number;
-  interval_end: number;
-  confidence: number;
-  evidence: string[];
-  supporting_wells: string[];
+export interface RelevanceBreakdown {
+  spatial_score: number;
+  depth_score: number;
+  formation_score: number;
+  event_density: number;
+  overall: number;
+  label: 'HIGH' | 'MEDIUM' | 'LOW';
 }
 
 export interface NearbyWell {
   well: Well;
   distance_km: number;
   relevant_events: WellEvent[];
+  relevance: RelevanceBreakdown;
+}
+
+export interface ContributingFactor {
+  factor: string;
+  detail: string;
+  weight: number;
+}
+
+export interface HistoricalRiskZone {
+  risk_type: string;
+  interval_start: number;
+  interval_end: number;
+  supporting_well_ids: string[];
+  supporting_event_ids: number[];
+  event_count: number;
+  formation: string;
+  explanation: string;
+}
+
+export interface RiskPrediction {
+  risk_type: string;
+  risk_score: number;
+  risk_level: string;
+  interval_start: number;
+  interval_end: number;
+  evidence_strength: string;
+  supporting_wells: string[];
+  supporting_events: number[];
+  contributing_factors: ContributingFactor[];
+  historical_zone?: HistoricalRiskZone | null;
+  explanation: string;
+  recommended_mitigation?: string | null;
+}
+
+export interface Alert {
+  alert_id: string;
+  well_id: string;
+  alert_type: string;
+  severity: string;
+  title: string;
+  body: string;
+  current_depth: number;
+  risk_interval_start: number;
+  risk_interval_end: number;
+  distance_to_zone_m: number;
+  primary_risk: string;
+  supporting_wells: string[];
+  recommended_mitigation?: string | null;
+  source_documents: string[];
+}
+
+export interface SearchResult {
+  result_type: string;
+  well_id: string;
+  well_name: string;
+  event?: WellEvent | null;
+  distance_km?: number | null;
+  relevance_score: number;
+  highlight: string;
+}
+
+export interface SearchResponse {
+  query: string;
+  total_results: number;
+  results: SearchResult[];
+  filters_applied: Record<string, unknown>;
 }
 
 export interface DrillingParameter {
@@ -71,55 +140,61 @@ export interface SystemStats {
   event_type_breakdown: Record<string, number>;
 }
 
+export interface DocumentSummary {
+  document_id: string;
+  well_id: string;
+  filename: string;
+  document_type: string;
+  date: string;
+  processing_status: string;
+}
+
 // ── API calls ─────────────────────────────────────────────────────────────────
 
-export const getWells = async (status?: string): Promise<Well[]> => {
-  const params = status ? { status } : {};
-  const response = await axios.get(`${API_URL}/wells`, { params });
-  return response.data;
-};
+export const getWells = (status?: string) =>
+  axios.get<Well[]>(`${API}/wells`, { params: status ? { status } : {} }).then(r => r.data);
 
-export const getWell = async (wellId: string): Promise<Well> => {
-  const response = await axios.get(`${API_URL}/wells/${wellId}`);
-  return response.data;
-};
+export const getActiveWells = () =>
+  axios.get<Well[]>(`${API}/wells/active`).then(r => r.data);
 
-export const getNearbyWells = async (wellId: string, radius: number): Promise<NearbyWell[]> => {
-  const response = await axios.get(`${API_URL}/wells/${wellId}/nearby`, {
-    params: { radius_km: radius },
-  });
-  return response.data;
-};
+export const getWell = (id: string) =>
+  axios.get<Well>(`${API}/wells/${id}`).then(r => r.data);
 
-export const getCurrentRisk = async (wellId: string, radius: number): Promise<RiskPrediction[]> => {
-  const response = await axios.get(`${API_URL}/risk/current`, {
-    params: { well_id: wellId, radius_km: radius },
-  });
-  return response.data;
-};
+export const getNearbyWells = (id: string, radius: number) =>
+  axios.get<NearbyWell[]>(`${API}/wells/${id}/nearby`, { params: { radius_km: radius } }).then(r => r.data);
 
-export const getWellEvents = async (wellId: string): Promise<WellEvent[]> => {
-  const response = await axios.get(`${API_URL}/wells/${wellId}/events`);
-  return response.data;
-};
+export const getWellEvents = (id: string) =>
+  axios.get<WellEvent[]>(`${API}/wells/${id}/events`).then(r => r.data);
 
-export const getDrillingParameters = async (wellId: string, limit = 100): Promise<DrillingParameter[]> => {
-  const response = await axios.get(`${API_URL}/wells/${wellId}/parameters`, {
-    params: { limit },
-  });
-  return response.data;
-};
+export const getDrillingParameters = (id: string, limit = 100) =>
+  axios.get<DrillingParameter[]>(`${API}/wells/${id}/parameters`, { params: { limit } }).then(r => r.data);
 
-export const getSystemStats = async (): Promise<SystemStats> => {
-  const response = await axios.get(`${API_URL}/stats/summary`);
-  return response.data;
-};
+export const getWellDocuments = (id: string) =>
+  axios.get<DocumentSummary[]>(`${API}/wells/${id}/documents`).then(r => r.data);
 
-export const getAllEvents = async (options?: {
-  severity?: string;
-  event_type?: string;
-  limit?: number;
-}): Promise<WellEvent[]> => {
-  const response = await axios.get(`${API_URL}/events`, { params: options });
-  return response.data;
-};
+export const getCurrentRisk = (id: string, radius: number, currentDepth?: number) =>
+  axios.get<RiskPrediction[]>(`${API}/risk/current`, {
+    params: { well_id: id, radius_km: radius, ...(currentDepth !== undefined ? { current_depth: currentDepth } : {}) },
+  }).then(r => r.data);
+
+export const getRiskZones = (id: string, radius: number) =>
+  axios.get<HistoricalRiskZone[]>(`${API}/risk/zones`, { params: { well_id: id, radius_km: radius } }).then(r => r.data);
+
+export const getAlerts = (id: string, radius: number, currentDepth?: number) =>
+  axios.get<Alert[]>(`${API}/alerts/${id}`, {
+    params: { radius_km: radius, ...(currentDepth !== undefined ? { current_depth: currentDepth } : {}) },
+  }).then(r => r.data);
+
+export const searchKnowledge = (q: string, activeWellId?: string, radiusKm = 20, limit = 20) =>
+  axios.get<SearchResponse>(`${API}/search`, {
+    params: { q, active_well_id: activeWellId, radius_km: radiusKm, limit },
+  }).then(r => r.data);
+
+export const getAllEvents = (opts?: { severity?: string; event_type?: string; formation?: string; limit?: number }) =>
+  axios.get<WellEvent[]>(`${API}/events`, { params: opts }).then(r => r.data);
+
+export const getSystemStats = () =>
+  axios.get<SystemStats>(`${API}/stats/summary`).then(r => r.data);
+
+export const getDocuments = (wellId?: string, docType?: string) =>
+  axios.get<DocumentSummary[]>(`${API}/documents`, { params: { well_id: wellId, doc_type: docType } }).then(r => r.data);
