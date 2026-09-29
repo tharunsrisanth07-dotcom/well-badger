@@ -582,6 +582,7 @@ function OverviewSection({
   events: WellEvent[];
   onSearch: (q: string) => void;
   onStartDemo: () => void;
+  onViewKnowledge: () => void;
 }) {
   const [telemetry, setTelemetry] = useState<DrillingParameter | null>(null);
   const [drawerRisk, setDrawerRisk] = useState<RiskPrediction | null>(null);
@@ -930,7 +931,7 @@ function OverviewSection({
               ))}
             </div>
             <div className="hi-actions">
-              <button className="btn btn-secondary btn-full">VIEW KNOWLEDGE BASE</button>
+              <button className="btn btn-secondary btn-full" onClick={onViewKnowledge}>VIEW KNOWLEDGE BASE</button>
               <button className="btn btn-secondary btn-full" onClick={() => topRisk && setDrawerRisk(topRisk)}>
                 VIEW RISK EVIDENCE
               </button>
@@ -1471,6 +1472,7 @@ export default function App() {
                   risks={risks} alerts={alerts} nearbyWells={nearbyWells}
                   riskZones={riskZones} events={events} onSearch={handleSearch}
                   onStartDemo={() => setDemoActive(true)}
+                  onViewKnowledge={() => setSection('knowledge')}
                 />
               )}
               {section === 'map' && <GeospatialSection activeWell={activeWell} nearbyWells={nearbyWells} radius={radius} onRadiusChange={setRadius} />}
