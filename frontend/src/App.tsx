@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useCallback, useRef } from 'react';
+import React, { useEffect, useState, useCallback, useRef, useMemo } from 'react';
 import { MapContainer, TileLayer, Marker, Popup, Circle, useMap } from 'react-leaflet';
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
@@ -461,11 +461,237 @@ function MapSection({
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
-//  OTHER SECTIONS (RISK, WELLS, KNOWLEDGE, SEARCH)
+//  RISK REASONING CHAIN — the decision pipeline visualised
 // ════════════════════════════════════════════════════════════════════════════════
-// Minimal updates to keep them functional but visually aligned with new theme.
+function RiskReasoningChain({
+  activeWell, risks, nearbyWells
+}: {
+  activeWell: Well;
+  risks: RiskPrediction[];
+  nearbyWells: NearbyWell[];
+}) {
+  const eventColors: Record<string, string> = {
+    MUD_LOSS:        'var(--amber)',
+    TORQUE_SPIKE:    'var(--orange)',
+    KICK:            'var(--red)',
+    STUCK_PIPE:      '#f472b6',
+    CEMENTING_ISSUE: 'var(--teal)',
+  };
 
-function RiskSection({ activeWell, risks, alerts }: { activeWell: Well | null; risks: RiskPrediction[]; alerts: Alert[]; }) {
+  // Flatten ALL events from nearby wells that are within ±150m of active depth
+  const relevantEvents = useMemo(() => {
+    const all: { event: typeof nearbyWells[0]['relevant_events'][0]; wellId: string; dist: number }[] = [];
+    nearbyWells.forEach(nw => {
+      nw.relevant_events.forEach(e => {
+        if (Math.abs(e.depth - activeWell.current_depth) <= 150) {
+          all.push({ event: e, wellId: nw.well.well_id, dist: nw.distance_km });
+        }
+      });
+    });
+    return all.sort((a, b) => a.event.depth - b.event.depth);
+  }, [nearbyWells, activeWell.current_depth]);
+
+  const nodeStyle: React.CSSProperties = {
+    background: 'var(--surface2)',
+    border: '1px solid var(--border-md)',
+    borderRadius: 'var(--r-lg)',
+    padding: '16px 20px',
+    position: 'relative',
+  };
+
+  const connectorStyle: React.CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    alignItems: 'center',
+    gap: 0,
+    margin: '2px 0',
+  };
+
+  const ArrowDown = () => (
+    <div style={connectorStyle}>
+      <div style={{ width: 2, height: 24, background: 'linear-gradient(var(--border-md), var(--blue-mid))' }} />
+      <svg width="14" height="8" viewBox="0 0 14 8">
+        <path d="M7 8 L0 0 L14 0 Z" fill="var(--blue)" opacity="0.6" />
+      </svg>
+    </div>
+  );
+
+  const NodeLabel = ({ text, sub }: { text: string; sub?: string }) => (
+    <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1.2, marginBottom: 6 }}>
+      {text}{sub && <span style={{ marginLeft: 8, color: 'var(--text-4)', fontWeight: 400, textTransform: 'none', letterSpacing: 0 }}>{sub}</span>}
+    </div>
+  );
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', alignItems: 'stretch', gap: 0, maxWidth: 780, margin: '0 auto 24px', width: '100%' }}>
+      <div style={{ fontSize: 12, fontWeight: 700, color: 'var(--text-3)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 12, display: 'flex', alignItems: 'center', gap: 8 }}>
+        <Shield size={12} style={{ color: 'var(--blue)' }} /> Risk Reasoning Chain
+      </div>
+
+      {/* NODE 1 — Active Well */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--blue)', background: 'linear-gradient(90deg, rgba(56,189,248,0.08), var(--surface2))' }}>
+        <NodeLabel text="Active Well" sub="current drilling position" />
+        <div style={{ display: 'flex', gap: 24, flexWrap: 'wrap' }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>WELL ID</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--blue)' }}>{activeWell.well_id}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>DEPTH</div>
+            <div className="mono" style={{ fontSize: 16, fontWeight: 700, color: 'var(--text)' }}>{fmtDepth(activeWell.current_depth)}</div>
+          </div>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)' }}>FORMATION</div>
+            <div style={{ fontSize: 15, fontWeight: 700, color: 'var(--teal)' }}>{activeWell.current_formation}</div>
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+            <div style={{ width: 8, height: 8, borderRadius: '50%', background: 'var(--green)', boxShadow: '0 0 6px var(--green)' }} />
+            <span style={{ fontSize: 11, color: 'var(--green)', fontWeight: 600 }}>ACTIVE</span>
+          </div>
+        </div>
+      </div>
+
+      <ArrowDown />
+
+      {/* NODE 2 — Analysis Radius */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--purple)' }}>
+        <NodeLabel text="Analysis Radius" />
+        <div style={{ display: 'flex', alignItems: 'center', gap: 20 }}>
+          <div className="mono" style={{ fontSize: 22, fontWeight: 700, color: 'var(--purple)' }}>10 km</div>
+          <div style={{ flex: 1 }}>
+            <div style={{ height: 6, background: 'var(--border)', borderRadius: 3, overflow: 'hidden' }}>
+              <div style={{ height: '100%', width: '100%', background: 'linear-gradient(90deg, var(--purple), var(--blue))', borderRadius: 3, animation: 'pulse 2s infinite' }} />
+            </div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)', marginTop: 4 }}>{nearbyWells.length} offset wells found within radius</div>
+          </div>
+        </div>
+      </div>
+
+      <ArrowDown />
+
+      {/* NODE 3 — Nearby Wells */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--teal)' }}>
+        <NodeLabel text="Nearby Historical Wells" sub={`${nearbyWells.length} analysed by relevance`} />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {nearbyWells.slice(0, 8).map(nw => (
+            <div key={nw.well.well_id} style={{
+              padding: '5px 10px', borderRadius: 'var(--r-md)',
+              background: nw.relevance.label === 'HIGH' ? 'rgba(251,191,36,0.12)' : nw.relevance.label === 'MEDIUM' ? 'rgba(56,189,248,0.08)' : 'var(--surface)',
+              border: `1px solid ${nw.relevance.label === 'HIGH' ? 'var(--amber-mid)' : nw.relevance.label === 'MEDIUM' ? 'var(--blue-mid)' : 'var(--border)'}`,
+            }}>
+              <div className="mono" style={{ fontSize: 11, fontWeight: 700, color: nw.relevance.label === 'HIGH' ? 'var(--amber)' : nw.relevance.label === 'MEDIUM' ? 'var(--blue)' : 'var(--text-4)' }}>{nw.well.well_id}</div>
+              <div style={{ fontSize: 10, color: 'var(--text-4)' }}>{nw.distance_km.toFixed(1)} km · {nw.relevance.label}</div>
+            </div>
+          ))}
+          {nearbyWells.length > 8 && <div style={{ padding: '5px 10px', fontSize: 11, color: 'var(--text-4)', alignSelf: 'center' }}>+{nearbyWells.length - 8} more</div>}
+        </div>
+      </div>
+
+      <ArrowDown />
+
+      {/* NODE 4 — Events in risk horizon */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--orange)', background: 'linear-gradient(90deg, rgba(251,146,60,0.06), var(--surface2))' }}>
+        <NodeLabel text="Events in Risk Horizon" sub={`±150 m from ${fmtDepth(activeWell.current_depth)}`} />
+        {relevantEvents.length === 0 ? (
+          <div style={{ fontSize: 12, color: 'var(--text-4)' }}>No historical events in the current risk horizon.</div>
+        ) : (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {relevantEvents.map((item, i) => {
+              const col = eventColors[item.event.event_type] || 'var(--text-3)';
+              return (
+                <div key={i} style={{ display: 'flex', alignItems: 'flex-start', gap: 12, padding: '8px 12px', background: 'var(--surface)', borderRadius: 'var(--r-md)', borderLeft: `3px solid ${col}` }}>
+                  <div style={{ flexShrink: 0, width: 56, textAlign: 'center' }}>
+                    <div style={{ fontSize: 10, color: 'var(--text-4)' }}>DEPTH</div>
+                    <div className="mono" style={{ fontSize: 13, fontWeight: 700, color: col }}>{fmtDepthN(item.event.depth)} m</div>
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', marginBottom: 4 }}>
+                      <span style={{ fontSize: 10, fontWeight: 700, color: col, background: `${col}1a`, padding: '2px 6px', borderRadius: 3, border: `1px solid ${col}44` }}>{item.event.event_type.replace('_', ' ')}</span>
+                      <span className={severityBadge(item.event.severity)}>{item.event.severity}</span>
+                      <span className="mono" style={{ fontSize: 10, color: 'var(--text-4)', padding: '2px 6px', background: 'var(--surface2)', borderRadius: 3 }}>{item.wellId} · {item.dist.toFixed(1)} km</span>
+                    </div>
+                    <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>{item.event.description}</div>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      <ArrowDown />
+
+      {/* NODE 5 — Overlapping Risk Horizon */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--red)', background: 'linear-gradient(90deg, rgba(248,113,113,0.08), var(--surface2))' }}>
+        <NodeLabel text="Overlapping Risk Horizon" />
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+          {risks.map((r, i) => (
+            <div key={i} style={{
+              display: 'flex', alignItems: 'center', gap: 8,
+              padding: '8px 14px', borderRadius: 'var(--r-md)',
+              background: r.risk_level === 'CRITICAL' ? 'var(--red-light)' : 'rgba(249,115,22,0.1)',
+              border: `1px solid ${r.risk_level === 'CRITICAL' ? 'var(--red-mid)' : 'rgba(249,115,22,0.3)'}`,
+            }}>
+              <div style={{ width: 8, height: 8, borderRadius: '50%', background: r.risk_level === 'CRITICAL' ? 'var(--red)' : 'var(--orange)', animation: 'pulse 1.5s infinite' }} />
+              <div>
+                <div style={{ fontSize: 11, fontWeight: 700, color: r.risk_level === 'CRITICAL' ? 'var(--red)' : 'var(--orange)' }}>{r.risk_type.replace('_', ' ')}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>{fmtDepthN(r.interval_start)}–{fmtDepthN(r.interval_end)} m · Score {r.risk_score}/100</div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <ArrowDown />
+
+      {/* NODE 6 — Evidence + Source + Mitigation */}
+      <div style={{ ...nodeStyle, borderLeft: '3px solid var(--green)', background: 'linear-gradient(90deg, rgba(74,222,128,0.06), var(--surface2))' }}>
+        <NodeLabel text="Evidence · Source · Mitigation" />
+        <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
+          {risks.map((r, i) => (
+            <div key={i} style={{ padding: '12px 16px', background: 'var(--surface)', borderRadius: 'var(--r-md)', borderTop: `2px solid ${r.risk_level === 'CRITICAL' ? 'var(--red)' : 'var(--orange)'}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                <span style={{ fontSize: 12, fontWeight: 700, color: 'var(--text)' }}>{r.risk_type.replace('_', ' ')}</span>
+                <div style={{ display: 'flex', gap: 6 }}>
+                  <span className={`badge badge-${r.risk_level === 'CRITICAL' ? 'red' : 'orange'}`}>{r.risk_level}</span>
+                  {r.ml_probability != null && <span className="badge badge-purple">ML {r.ml_probability}%</span>}
+                </div>
+              </div>
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 12 }}>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>📋 Evidence</div>
+                  {r.contributing_factors.slice(0, 3).map((f, j) => (
+                    <div key={j} style={{ display: 'flex', gap: 6, marginBottom: 5 }}>
+                      <div style={{ width: 4, height: 4, borderRadius: '50%', background: 'var(--blue)', marginTop: 5, flexShrink: 0 }} />
+                      <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.4 }}><strong style={{ color: 'var(--text-2)' }}>{f.factor}:</strong> {f.detail}</div>
+                    </div>
+                  ))}
+                </div>
+                <div>
+                  <div style={{ fontSize: 10, fontWeight: 700, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1, marginBottom: 6 }}>🛡 Mitigation</div>
+                  <div style={{ fontSize: 11, color: 'var(--text-3)', lineHeight: 1.5 }}>
+                    {relevantEvents.find(e => e.event.event_type === r.risk_type)?.event.mitigation
+                      || 'Monitor parameters closely. Consult offset well completion reports for formation-specific procedures.'}
+                  </div>
+                  {relevantEvents.find(e => e.event.event_type === r.risk_type) && (
+                    <div style={{ marginTop: 6 }}>
+                      <span className="source-ref">📄 {relevantEvents.find(e => e.event.event_type === r.risk_type)?.event.source_document}</span>
+                      {relevantEvents.find(e => e.event.event_type === r.risk_type)?.event.source_page != null && (
+                        <span style={{ fontSize: 10, color: 'var(--text-4)', marginLeft: 4 }}>p.{relevantEvents.find(e => e.event.event_type === r.risk_type)?.event.source_page}</span>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RiskSection({ activeWell, risks, alerts, nearbyWells }: { activeWell: Well | null; risks: RiskPrediction[]; alerts: Alert[]; nearbyWells: NearbyWell[]; }) {
   if (!activeWell) return <Spinner />;
   return (
     <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
@@ -479,6 +705,10 @@ function RiskSection({ activeWell, risks, alerts }: { activeWell: Well | null; r
           </div>
         </div>
       ))}
+
+      {/* Risk Reasoning Chain */}
+      {risks.length > 0 && <RiskReasoningChain activeWell={activeWell} risks={risks} nearbyWells={nearbyWells} />}
+
       <div className="section-title"><Shield size={12}/> Detailed Risk Intelligence</div>
       <div className="grid-2">
         {risks.map((r, i) => (
@@ -891,7 +1121,7 @@ export default function App() {
                 <OverviewSection activeWell={activeWell} simDepth={simDepth} stats={stats} risks={risks} alerts={alerts} nearbyWells={nearbyWells} riskZones={riskZones} radius={radius} />
               )}
             {section === 'map' && <MapSection activeWell={activeWell} nearbyWells={nearbyWells} radius={radius} onRadiusChange={setRadius} />}
-            {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} alerts={alerts} />}
+            {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} alerts={alerts} nearbyWells={nearbyWells} />}
             {section === 'anomaly' && <AnomalySection activeWellId={activeWellId} />}
             {section === 'audit' && <AuditSection activeWellId={activeWellId} radius={radius} simDepth={simDepth} />}
             {section === 'wells' && <WellsSection wells={allWells} />}
