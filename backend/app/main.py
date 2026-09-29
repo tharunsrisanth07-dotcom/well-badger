@@ -11,6 +11,8 @@ from .services.relevance import get_nearby_wells_with_relevance
 from .services.event_analysis import derive_historical_risk_zones
 from .services.alert_engine import generate_alerts
 from .services.search import search_knowledge
+from .services.anomaly_detector import detect_anomalies, AnomalyReport
+from .services.audit_report import generate_audit_report, AuditReport
 
 app = FastAPI(
     title="NWIS API",
@@ -233,3 +235,60 @@ def get_system_stats(db: Session = Depends(database.get_db)):
         high_severity_events=high_sev,
         event_type_breakdown=breakdown,
     )
+
+
+# ── Anomaly Detection ──────────────────────────────────────────────────────────
+
+@app.get("/api/anomalies/{well_id}", response_model=AnomalyReport)
+def get_anomalies(
+    well_id: str,
+    limit: int = Query(200, le=500),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Detect statistical anomalies in drilling parameters (torque spikes, pressure surges,
+    ROP drops, etc.) using z-score analysis.
+    """
+    return detect_anomalies(db, well_id, limit=limit)
+
+
+# ── Audit / Explainability Report ─────────────────────────────────────────────
+
+@app.get("/api/audit/{well_id}", response_model=AuditReport)
+def get_audit_report(
+    well_id: str,
+    radius_km: float = Query(10.0, ge=1.0, le=50.0),
+    current_depth: Optional[float] = Query(None, description="Override current depth for simulation"),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Generate a full explainability and audit report for a well's current risk assessment.
+    Includes ML vs evidence-engine integrity checks and decision trail.
+    Required for Oil India's regulatory audit compliance.
+    """
+    return generate_audit_report(db, well_id, radius_km, current_depth_override=current_depth)
+
+
+# ── Live Telemetry (simulated real-time feed) ─────────────────────────────────
+
+@app.get("/api/telemetry/{well_id}/latest")
+def get_latest_telemetry(
+    well_id: str,
+    depth: Optional[float] = Query(None, description="Fetch params nearest to this depth"),
+    db: Session = Depends(database.get_db),
+):
+    """
+    Return the latest (or depth-nearest) drilling parameters for a well.
+    Simulates a real-time telemetry feed from eRTMAC.
+    """
+    q = db.query(models.DrillingParameter).filter(models.DrillingParameter.well_id == well_id)
+    if depth is not None:
+        # Return 5 records nearest to the given depth
+        all_params = q.order_by(models.DrillingParameter.depth).all()
+        if not all_params:
+            raise HTTPException(status_code=404, detail="No telemetry data found")
+        nearest = sorted(all_params, key=lambda p: abs(p.depth - depth))[:5]
+        nearest.sort(key=lambda p: p.depth)
+        return nearest
+    else:
+        return q.order_by(models.DrillingParameter.depth.desc()).limit(5).all()

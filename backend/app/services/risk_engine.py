@@ -25,10 +25,21 @@ Outputs per risk type:
 from typing import List, Dict
 from datetime import datetime
 from sqlalchemy.orm import Session
+import joblib
+import pandas as pd
+from pathlib import Path
 
 from ..models import models, schemas
 from . import relevance as rel_svc
 from .event_analysis import derive_historical_risk_zones
+
+ML_MODEL_PATH = Path(__file__).resolve().parent.parent.parent / "ml_model.joblib"
+ml_model = None
+if ML_MODEL_PATH.exists():
+    try:
+        ml_model = joblib.load(ML_MODEL_PATH)
+    except Exception:
+        pass
 
 # ── Look-up tables ─────────────────────────────────────────────────────────────
 RISK_TYPES = ["MUD_LOSS", "STUCK_PIPE", "KICK", "TORQUE_SPIKE", "CEMENTING_ISSUE"]
@@ -88,6 +99,18 @@ def analyze_risk(
     # Derive historical risk zones
     risk_zones = derive_historical_risk_zones(db, active_well_id, nearby, min_supporting_wells=2)
     zone_by_type = {z.risk_type: z for z in risk_zones}
+
+    # Run ML Model inference
+    ml_probs = {}
+    if ml_model and active_well.current_formation:
+        try:
+            X_infer = pd.DataFrame([{"depth": current_depth, "formation": active_well.current_formation}])
+            probs = ml_model.predict_proba(X_infer)[0]
+            for cls, prob in zip(ml_model.classes_, probs):
+                if cls != "NONE":
+                    ml_probs[cls] = round(float(prob) * 100, 1)
+        except Exception:
+            pass
 
     # Accumulate raw signals per risk type
     accum: Dict[str, Dict] = {
@@ -205,6 +228,7 @@ def analyze_risk(
             historical_zone=zone,
             explanation=explanation,
             recommended_mitigation=rec_mit,
+            ml_probability=ml_probs.get(rt),
         ))
 
     predictions.sort(key=lambda p: p.risk_score, reverse=True)

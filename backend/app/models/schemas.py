@@ -105,6 +105,7 @@ class RiskPrediction(BaseModel):
     historical_zone: Optional[HistoricalRiskZone] = None
     explanation: str            # 1-2 sentence human-readable explanation
     recommended_mitigation: Optional[str] = None
+    ml_probability: Optional[float] = None
 
     # Legacy alias kept for backward compat
     @property

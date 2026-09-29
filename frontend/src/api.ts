@@ -80,6 +80,7 @@ export interface RiskPrediction {
   historical_zone?: HistoricalRiskZone | null;
   explanation: string;
   recommended_mitigation?: string | null;
+  ml_probability?: number | null;
 }
 
 export interface Alert {
@@ -198,3 +199,68 @@ export const getSystemStats = () =>
 
 export const getDocuments = (wellId?: string, docType?: string) =>
   axios.get<DocumentSummary[]>(`${API}/documents`, { params: { well_id: wellId, doc_type: docType } }).then(r => r.data);
+
+// ── Anomaly Detection ─────────────────────────────────────────────────────────
+
+export interface ParameterAnomaly {
+  parameter: string;
+  anomaly_type: string;
+  depth_m: number;
+  value: number;
+  baseline_mean: number;
+  z_score: number;
+  severity: string;
+  narrative: string;
+}
+
+export interface AnomalyReport {
+  well_id: string;
+  total_anomalies: number;
+  anomalies: ParameterAnomaly[];
+  summary: string;
+}
+
+export const getAnomalies = (wellId: string, limit = 200) =>
+  axios.get<AnomalyReport>(`${API}/anomalies/${wellId}`, { params: { limit } }).then(r => r.data);
+
+// ── Audit Report ──────────────────────────────────────────────────────────────
+
+export interface AuditEntry {
+  risk_type: string;
+  evidence_score: number;
+  ml_probability: number | null;
+  final_risk_level: string;
+  supporting_wells: string[];
+  contributing_factors: string[];
+  decision_rationale: string;
+  integrity_check: string;
+}
+
+export interface AuditReport {
+  report_id: string;
+  generated_at: string;
+  well_id: string;
+  current_depth_m: number;
+  current_formation: string;
+  radius_km: number;
+  engine_version: string;
+  ml_model_active: boolean;
+  offset_wells_analysed: number;
+  total_events_examined: number;
+  audit_entries: AuditEntry[];
+  overall_integrity_status: string;
+  disclaimer: string;
+}
+
+export const getAuditReport = (wellId: string, radius: number, depth?: number) =>
+  axios.get<AuditReport>(`${API}/audit/${wellId}`, {
+    params: { radius_km: radius, ...(depth !== undefined ? { current_depth: depth } : {}) },
+  }).then(r => r.data);
+
+// ── Live Telemetry ────────────────────────────────────────────────────────────
+
+export const getLatestTelemetry = (wellId: string, depth?: number) =>
+  axios.get<DrillingParameter[]>(`${API}/telemetry/${wellId}/latest`, {
+    params: { ...(depth !== undefined ? { depth } : {}) },
+  }).then(r => r.data);
+

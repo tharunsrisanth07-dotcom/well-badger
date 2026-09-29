@@ -12,9 +12,10 @@ import {
 import {
   getActiveWells, getNearbyWells, getCurrentRisk, getSystemStats,
   getAllEvents, getAlerts, getRiskZones, searchKnowledge,
+  getAnomalies, getAuditReport,
   type Well, type NearbyWell, type RiskPrediction, type Alert,
   type WellEvent, type SystemStats, type HistoricalRiskZone,
-  type SearchResponse,
+  type SearchResponse, type AnomalyReport, type AuditReport,
 } from './api';
 
 // ── Leaflet icon fix ──────────────────────────────────────────────────────────
@@ -37,7 +38,7 @@ const MED_ICON    = makeIcon('yellow');
 const LOW_ICON    = makeIcon('blue');
 
 // ── Types ─────────────────────────────────────────────────────────────────────
-type Section = 'overview' | 'map' | 'risk' | 'wells' | 'knowledge' | 'search';
+type Section = 'overview' | 'map' | 'risk' | 'wells' | 'knowledge' | 'search' | 'anomaly' | 'audit';
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const fmtDepth  = (d: number) => `${d.toLocaleString('en-IN', { maximumFractionDigits: 0 })} m`;
@@ -70,7 +71,7 @@ function eventTypeBadge(et: string) {
 // ── Map fly-to helper ─────────────────────────────────────────────────────────
 function FlyTo({ lat, lon }: { lat: number; lon: number }) {
   const map = useMap();
-  useEffect(() => { map.flyTo([lat, lon], 12, { duration: 1 }); }, [lat, lon]);
+  useEffect(() => { map.flyTo([lat, lon], 12, { duration: 1 }); }, [lat, lon, map]);
   return null;
 }
 
@@ -95,18 +96,19 @@ const EmptyState = ({ icon: Icon, msg }: { icon: React.ComponentType<{ size?: nu
 
 // ── Particles ─────────────────────────────────────────────────────────────────
 const DrillingParticles = () => {
-  const particles = Array.from({ length: 15 });
+  const particles = useMemo(() => Array.from({ length: 15 }).map(() => ({
+    left: `${Math.random() * 100}%`,
+    top: `${Math.random() * 100}%`,
+    width: `${Math.random() * 3 + 1}px`,
+    height: `${Math.random() * 3 + 1}px`,
+    animationDuration: `${Math.random() * 10 + 10}s`,
+    animationDelay: `${Math.random() * 5}s`,
+  })), []);
+  
   return (
     <div className="drilling-particles">
-      {particles.map((_, i) => (
-        <div key={i} className="particle" style={{
-          left: `${Math.random() * 100}%`,
-          top: `${Math.random() * 100}%`,
-          width: `${Math.random() * 3 + 1}px`,
-          height: `${Math.random() * 3 + 1}px`,
-          animationDuration: `${Math.random() * 10 + 10}s`,
-          animationDelay: `${Math.random() * 5}s`,
-        }} />
+      {particles.map((style, i) => (
+        <div key={i} className="particle" style={style} />
       ))}
     </div>
   );
@@ -121,6 +123,7 @@ function OverviewSection({
   activeWell: Well | null; simDepth: number; stats: SystemStats | null;
   risks: RiskPrediction[]; alerts: Alert[];
   nearbyWells: NearbyWell[]; riskZones: HistoricalRiskZone[];
+  radius: number;
 }) {
   if (!activeWell) return <Spinner label="Loading active well…" />;
 
@@ -212,6 +215,11 @@ function OverviewSection({
                   <span className={`risk-score-large text-${topRisk.risk_level}`}>{topRisk.risk_score}</span>
                   <span style={{ fontSize: 12, color: 'var(--text-4)', fontWeight: 600 }}>/ 100</span>
                   <span className={`badge badge-${topRisk.risk_level === 'CRITICAL' ? 'red' : topRisk.risk_level === 'HIGH' ? 'orange' : 'amber'}`}>{topRisk.risk_level}</span>
+                  {topRisk.ml_probability != null && (
+                    <span className="badge badge-purple" style={{ marginLeft: 8 }}>
+                      ML PROBABILITY: {topRisk.ml_probability}%
+                    </span>
+                  )}
                 </div>
               </div>
               <div className="risk-meta-grid">
@@ -476,7 +484,12 @@ function RiskSection({ activeWell, risks, alerts }: { activeWell: Well | null; r
         {risks.map((r, i) => (
           <div key={i} className="card interactive-card" style={{ padding: 20 }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
-              <span className={`badge badge-${r.risk_level === 'CRITICAL' ? 'red' : 'orange'}`}>{r.risk_type.replace('_', ' ')}</span>
+              <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+                <span className={`badge badge-${r.risk_level === 'CRITICAL' ? 'red' : 'orange'}`}>{r.risk_type.replace('_', ' ')}</span>
+                {r.ml_probability != null && (
+                  <span className="badge badge-purple">ML: {r.ml_probability}%</span>
+                )}
+              </div>
               <span className={`mono text-${r.risk_level}`} style={{ fontWeight: 700, fontSize: 16 }}>{r.risk_score}/100</span>
             </div>
             <div style={{ fontSize: 11, color: 'var(--text-4)', marginBottom: 12 }}>Zone: {fmtDepthN(r.interval_start)}–{fmtDepthN(r.interval_end)} m</div>
@@ -580,12 +593,151 @@ function SearchSection({ activeWellId }: { activeWellId: string }) {
 }
 
 // ════════════════════════════════════════════════════════════════════════════════
+//  ANOMALY DETECTION SECTION
+// ════════════════════════════════════════════════════════════════════════════════
+function AnomalySection({ activeWellId }: { activeWellId: string }) {
+  const [report, setReport] = useState<AnomalyReport | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getAnomalies(activeWellId).then(r => { setReport(r); setLoading(false); }).catch(() => setLoading(false));
+  }, [activeWellId]);
+
+  if (loading) return <Spinner label="Running anomaly detection…" />;
+  if (!report) return <EmptyState icon={Activity} msg="No anomaly data" />;
+
+  const sevColor = (s: string) => s === 'CRITICAL' ? 'var(--red)' : s === 'HIGH' ? 'var(--orange)' : s === 'MEDIUM' ? 'var(--amber)' : 'var(--green)';
+  const sevBadge = (s: string) => s === 'CRITICAL' ? 'badge badge-red' : s === 'HIGH' ? 'badge badge-orange' : s === 'MEDIUM' ? 'badge badge-amber' : 'badge badge-green';
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      <div className="card" style={{ padding: 16, borderLeft: `3px solid ${report.total_anomalies > 0 ? 'var(--orange)' : 'var(--green)'}` }}>
+        <div style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', marginBottom: 4 }}>Anomaly Detection Summary</div>
+        <div style={{ fontSize: 12, color: 'var(--text-3)' }}>{report.summary}</div>
+        <div style={{ marginTop: 8 }}>
+          <span className="badge badge-gray">{report.total_anomalies} anomalies detected</span>
+          <span className="badge badge-blue" style={{ marginLeft: 8 }}>Well: {report.well_id}</span>
+        </div>
+      </div>
+
+      <div className="section-title"><Activity size={12}/> Parameter Anomalies (Z-Score Analysis)</div>
+      {report.anomalies.length === 0 ? (
+        <EmptyState icon={CheckCircle2} msg="No anomalies detected — drilling parameters are within normal range." />
+      ) : (
+        <div className="grid-2">
+          {report.anomalies.map((a, i) => (
+            <div key={i} className="card interactive-card" style={{ padding: 16, borderLeft: `3px solid ${sevColor(a.severity)}` }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 10 }}>
+                <div style={{ display: 'flex', gap: 8 }}>
+                  <span className={sevBadge(a.severity)}>{a.severity}</span>
+                  <span className="badge badge-gray">{a.parameter}</span>
+                </div>
+                <span className="mono" style={{ color: 'var(--text-4)', fontSize: 11 }}>{fmtDepthN(a.depth_m)} m</span>
+              </div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginBottom: 6 }}>{a.anomaly_type.replace(/_/g, ' ')}</div>
+              <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.5, marginBottom: 10 }}>{a.narrative}</div>
+              <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-4)' }}>
+                <span>Value: <strong style={{ color: 'var(--text)' }}>{a.value}</strong></span>
+                <span>Baseline: <strong style={{ color: 'var(--text)' }}>{a.baseline_mean}</strong></span>
+                <span>Z-Score: <strong style={{ color: sevColor(a.severity) }}>{a.z_score}</strong></span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
+//  AUDIT REPORT SECTION
+// ════════════════════════════════════════════════════════════════════════════════
+function AuditSection({ activeWellId, radius, simDepth }: { activeWellId: string; radius: number; simDepth: number }) {
+  const [report, setReport] = useState<AuditReport | null>(null);
+  const [loading, setLoading] = useState(false);
+
+  useEffect(() => {
+    setLoading(true);
+    getAuditReport(activeWellId, radius, simDepth)
+      .then(r => { setReport(r); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [activeWellId, radius, simDepth]);
+
+  if (loading) return <Spinner label="Generating audit report…" />;
+  if (!report) return <EmptyState icon={FileText} msg="No audit data" />;
+
+  const integrityColor = (s: string) => s === 'ALL_CONSISTENT' ? 'var(--green)' : s === 'REVIEW_REQUIRED' ? 'var(--orange)' : 'var(--text-4)';
+  const integrityBadge = (s: string) => s === 'CONSISTENT' ? 'badge badge-green' : s === 'ML_HIGHER' || s === 'ML_LOWER' ? 'badge badge-orange' : 'badge badge-gray';
+
+  return (
+    <div className="fade-in" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+      {/* Header */}
+      <div className="card" style={{ padding: 16 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 12 }}>
+          <div>
+            <div style={{ fontSize: 11, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1 }}>Audit Report ID</div>
+            <div className="mono" style={{ fontSize: 13, color: 'var(--blue)', marginTop: 2 }}>{report.report_id}</div>
+          </div>
+          <span className="badge" style={{ background: 'var(--surface2)', color: integrityColor(report.overall_integrity_status), border: `1px solid ${integrityColor(report.overall_integrity_status)}` }}>
+            {report.overall_integrity_status.replace(/_/g, ' ')}
+          </span>
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 12 }}>
+          {[
+            ['Generated', new Date(report.generated_at).toLocaleTimeString()],
+            ['Depth', `${report.current_depth_m} m`],
+            ['Formation', report.current_formation],
+            ['Offset Wells', report.offset_wells_analysed],
+            ['Events Examined', report.total_events_examined],
+            ['Engine', `v${report.engine_version}`],
+            ['ML Active', report.ml_model_active ? 'YES' : 'NO'],
+            ['Radius', `${report.radius_km} km`],
+          ].map(([l, v]) => (
+            <div key={l as string} style={{ background: 'var(--surface2)', padding: 10, borderRadius: 'var(--r-md)' }}>
+              <div style={{ fontSize: 10, color: 'var(--text-4)', textTransform: 'uppercase' }}>{l as string}</div>
+              <div style={{ fontSize: 13, fontWeight: 600, color: 'var(--text)', marginTop: 2 }}>{v as string}</div>
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="section-title"><Shield size={12}/> Per-Risk Decision Trail</div>
+      {report.audit_entries.map((entry, i) => (
+        <div key={i} className="card" style={{ padding: 16 }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: 12 }}>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <span className="badge badge-blue">{entry.risk_type.replace(/_/g, ' ')}</span>
+              <span className={`badge badge-${entry.final_risk_level === 'CRITICAL' ? 'red' : entry.final_risk_level === 'HIGH' ? 'orange' : 'amber'}`}>{entry.final_risk_level}</span>
+              <span className={integrityBadge(entry.integrity_check)}>{entry.integrity_check.replace(/_/g, ' ')}</span>
+            </div>
+            <div style={{ display: 'flex', gap: 16, fontSize: 12 }}>
+              <span>Evidence: <strong style={{ color: 'var(--text)' }}>{entry.evidence_score}/100</strong></span>
+              {entry.ml_probability != null && <span>ML: <strong style={{ color: 'var(--purple, #9b5de5)' }}>{entry.ml_probability}%</strong></span>}
+            </div>
+          </div>
+          <div style={{ fontSize: 12, color: 'var(--text-3)', lineHeight: 1.6, marginBottom: 10, padding: '8px 12px', background: 'var(--surface2)', borderRadius: 4 }}>{entry.decision_rationale}</div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+            {entry.contributing_factors.map((f, j) => (
+              <span key={j} className="badge badge-gray" style={{ fontSize: 10 }}>{f}</span>
+            ))}
+          </div>
+        </div>
+      ))}
+      <div style={{ fontSize: 11, color: 'var(--text-4)', padding: '8px 12px', borderLeft: '2px solid var(--border-md)', marginTop: 8 }}>{report.disclaimer}</div>
+    </div>
+  );
+}
+
+// ════════════════════════════════════════════════════════════════════════════════
 //  ROOT APP
 // ════════════════════════════════════════════════════════════════════════════════
 const NAV: { id: Section; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
-  { id: 'overview',   label: 'Overview',         Icon: Gauge },
-  { id: 'map',        label: 'Geospatial Map',   Icon: Globe },
+  { id: 'overview',   label: 'Overview',          Icon: Gauge },
+  { id: 'map',        label: 'Geospatial Map',    Icon: Globe },
   { id: 'risk',       label: 'Risk Intelligence', Icon: Shield },
+  { id: 'anomaly',    label: 'Anomaly Detect.',   Icon: Activity },
+  { id: 'audit',      label: 'Audit Report',      Icon: FileText },
   { id: 'wells',      label: 'Well Explorer',     Icon: Database },
   { id: 'knowledge',  label: 'Knowledge Base',    Icon: BookOpen },
   { id: 'search',     label: 'Search',            Icon: Search },
@@ -627,6 +779,7 @@ export default function App() {
       setActiveWells(ws);
       if (ws.length > 0 && !ws.find(w => w.well_id === activeWellId)) setActiveWellId(ws[0].well_id);
     });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   useEffect(() => {
@@ -666,7 +819,7 @@ export default function App() {
     finally { setLoading(false); }
   }, [activeWellId, radius, simDepth]);
 
-  useEffect(() => { refresh(simDepth); }, [activeWellId, radius]);
+  useEffect(() => { refresh(simDepth); }, [activeWellId, radius, refresh, simDepth]);
 
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const onDepthChange = (d: number) => {
@@ -739,6 +892,8 @@ export default function App() {
               )}
             {section === 'map' && <MapSection activeWell={activeWell} nearbyWells={nearbyWells} radius={radius} onRadiusChange={setRadius} />}
             {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} alerts={alerts} />}
+            {section === 'anomaly' && <AnomalySection activeWellId={activeWellId} />}
+            {section === 'audit' && <AuditSection activeWellId={activeWellId} radius={radius} simDepth={simDepth} />}
             {section === 'wells' && <WellsSection wells={allWells} />}
             {section === 'knowledge' && <KnowledgeSection events={events} />}
             {section === 'search' && <SearchSection activeWellId={activeWellId} />}
