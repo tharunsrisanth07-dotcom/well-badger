@@ -574,7 +574,7 @@ function DemoTour({ isActive, onClose, setSection }: { isActive: boolean, onClos
 // OVERVIEW SECTION
 // ══════════════════════════════════════════════════════════════════════
 function OverviewSection({
-  activeWell, simDepth, stats, risks, alerts, nearbyWells, riskZones, events, onSearch, onStartDemo
+  activeWell, simDepth, stats, risks, alerts, nearbyWells, riskZones, events, onSearch, onStartDemo, onViewKnowledge
 }: {
   activeWell: Well | null; simDepth: number; stats: SystemStats | null;
   risks: RiskPrediction[]; alerts: Alert[];
