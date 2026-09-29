@@ -120,6 +120,9 @@ const NAV: { id: Section; label: string; Icon: React.ComponentType<{ size?: numb
   { id: 'wells',     label: 'Well Explorer',     Icon: Database },
   { id: 'knowledge', label: 'Knowledge Base',    Icon: BookOpen },
   { id: 'search',    label: 'Search',            Icon: Search },
+];
+
+const DIAGNOSTICS: { id: Section; label: string; Icon: React.ComponentType<{ size?: number }> }[] = [
   { id: 'anomaly',   label: 'Anomaly Detect',    Icon: Activity },
   { id: 'audit',     label: 'Audit Report',      Icon: FileText },
 ];
@@ -143,9 +146,12 @@ function EvidenceDrawer({ events, risk, onClose }: {
       <div className="drawer">
         <div className="drawer-header">
           <div>
-            <div className="drawer-title">Evidence — {risk.risk_type.replace(/_/g, ' ')}</div>
-            <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 2 }}>
-              {matching.length} source event{matching.length !== 1 ? 's' : ''} · Zone {fmtN(risk.interval_start)}–{fmtN(risk.interval_end)} m
+            <div className="drawer-title" style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+              <FileText size={14} style={{ color: 'var(--cyan)' }} />
+              EVIDENCE RECORD
+            </div>
+            <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 4, textTransform: 'uppercase', letterSpacing: 1 }}>
+              {risk.risk_type.replace(/_/g, ' ')} · {matching.length} source event{matching.length !== 1 ? 's' : ''}
             </div>
           </div>
           <button className="drawer-close" onClick={onClose}>×</button>
@@ -177,32 +183,31 @@ function EvidenceDrawer({ events, risk, onClose }: {
             <SectionTitle icon={FileText}>Source Events ({matching.length})</SectionTitle>
             <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 10 }}>
               {matching.map(e => (
-                <div key={e.event_id} className="evidence-item" style={{ borderLeft: `3px solid ${eventColor(e.event_type)}` }}>
-                  <div className="flex items-center gap-2" style={{ marginBottom: 8 }}>
-                    <span className={eventTypeBadge(e.event_type)}>{e.event_type.replace(/_/g, ' ')}</span>
-                    <span className={sevBadge(e.severity)}>{e.severity}</span>
-                    <span className="mono text-xs" style={{ color: 'var(--cyan)' }}>{e.well_id}</span>
+                <div key={e.event_id} className="evidence-record">
+                  <div className="evidence-record-header">
+                    <span className="source-ref"><FileText size={10} style={{ display: 'inline', marginRight: 4, verticalAlign: '-1px' }} />{e.source_document}{e.source_page != null ? ` p.${e.source_page}` : ''}</span>
                   </div>
-                  {[
-                    ['Depth', fmtDepth(e.depth)],
-                    ['Formation', e.formation],
-                    ['Observation', e.description],
-                    ['Cause', e.cause],
-                    ['Mitigation', e.mitigation],
-                    ['Outcome', e.outcome],
-                  ].map(([k, v]) => v && (
-                    <div key={k} className="evidence-row">
-                      <div className="evidence-row-key">{k}</div>
-                      <div className="evidence-row-val">{v}</div>
-                    </div>
-                  ))}
-                  <div style={{ marginTop: 8 }}>
-                    <span className="source-ref">📄 {e.source_document}{e.source_page != null ? ` p.${e.source_page}` : ''}</span>
+                  <div className="evidence-record-body">
+                    {[
+                      ['EVENT', e.event_type.replace(/_/g, ' ')],
+                      ['WELL', e.well_id],
+                      ['DEPTH', fmtDepth(e.depth)],
+                      ['FORMATION', e.formation],
+                      ['OBSERVATION', e.description],
+                      ['CAUSE', e.cause],
+                      ['MITIGATION', e.mitigation],
+                      ['OUTCOME', e.outcome],
+                    ].map(([k, v]) => v && (
+                      <div key={k} className="evidence-row">
+                        <div className="evidence-row-key">{k}</div>
+                        <div className="evidence-row-val">{v}</div>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))}
               {matching.length === 0 && (
-                <div style={{ fontSize: 12, color: 'var(--text-4)', padding: 12 }}>
+                <div style={{ fontSize: 12, color: 'var(--text-4)', padding: 12, border: '1px solid var(--border-2)', borderRadius: 'var(--r-sm)' }}>
                   Supporting event records are available in the risk engine for event IDs: {risk.supporting_events.slice(0,5).join(', ')}{risk.supporting_events.length > 5 ? '…' : ''}
                 </div>
               )}
@@ -211,6 +216,45 @@ function EvidenceDrawer({ events, risk, onClose }: {
         </div>
       </div>
     </>
+  );
+}
+
+// ══════════════════════════════════════════════════════════════════════
+// WORKSPACE HEADER
+// ══════════════════════════════════════════════════════════════════════
+function WorkspaceHeader({ title, subtitle, activeWell, simDepth }: { title: string; subtitle: string; activeWell?: Well | null; simDepth?: number; }) {
+  return (
+    <div className="workspace-header">
+      <div className="workspace-header-text">
+        <h1 className="workspace-title">{title}</h1>
+        <p className="workspace-subtitle">{subtitle}</p>
+      </div>
+      {activeWell && simDepth != null && (
+        <div className="workspace-context">
+          <div className="wc-item">
+            <span className="wc-label">Well</span>
+            <span className="wc-val text-cyan font-bold">{activeWell.well_id}</span>
+          </div>
+          <div className="wc-div" />
+          <div className="wc-item">
+            <span className="wc-label">Depth</span>
+            <span className="wc-val mono">{fmtDepth(simDepth)}</span>
+          </div>
+          <div className="wc-div" />
+          <div className="wc-item">
+            <span className="wc-label">Formation</span>
+            <span className="wc-val text-teal">{activeWell.current_formation}</span>
+          </div>
+          <div className="wc-div" />
+          <div className="wc-item">
+            <span className="wc-label">Feed</span>
+            <span className="wc-val flex items-center gap-1" style={{ color: 'var(--green)' }}>
+              <div className="feed-dot" style={{ width: 4, height: 4 }} /> SIMULATED
+            </span>
+          </div>
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -262,6 +306,11 @@ function OverviewSection({
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader
+        title="DRILLING COMMAND CENTER"
+        subtitle="Active-well state · live telemetry · depth-aligned risk"
+        activeWell={activeWell} simDepth={simDepth} />
+
       {/* ── Alerts ── */}
       {alerts.slice(0, 1).map(a => (
         <div key={a.alert_id} className={`alert-strip ${a.severity === 'CRITICAL' ? 'critical' : ''}`}>
@@ -289,16 +338,23 @@ function OverviewSection({
         <div className="telem-grid">
           {[
             { label: 'Depth', val: fmtN(simDepth), unit: 'm', color: 'var(--cyan)' },
-            { label: 'ROP', val: fmtVal(telemetry?.rop), unit: 'm/hr' },
+            { label: 'ROP', val: fmtVal(telemetry?.rop), unit: 'm/hr', trend: '↓' },
             { label: 'WOB', val: fmtVal(telemetry?.wob), unit: 'kN' },
             { label: 'RPM', val: fmtVal(telemetry?.rpm, 0), unit: 'rpm' },
-            { label: 'Torque', val: fmtVal(telemetry?.torque), unit: 'kN·m' },
-            { label: 'SPP', val: fmtVal(telemetry?.pressure, 0), unit: 'psi' },
+            { label: 'Torque', val: fmtVal(telemetry?.torque), unit: 'kN·m', trend: '↑' },
+            { label: 'SPP', val: fmtVal(telemetry?.pressure, 0), unit: 'psi', trend: '→' },
             { label: 'Mud Wt', val: fmtVal(telemetry?.mud_weight, 2), unit: 'SG' },
-          ].map(({ label, val, unit, color }) => (
+          ].map(({ label, val, unit, color, trend }) => (
             <div key={label} className="telem-cell">
               <div className="telem-label">{label}</div>
-              <div className="telem-value" style={color ? { color } : {}}>{val}</div>
+              <div className="flex items-end gap-2">
+                <div className="telem-value" style={color ? { color } : {}}>{val}</div>
+                {trend && (
+                  <div className={`telem-trend ${trend === '↑' ? 'trend-up' : trend === '↓' ? 'trend-down' : 'trend-flat'}`}>
+                    {trend}
+                  </div>
+                )}
+              </div>
               <div className="telem-unit">{unit}</div>
             </div>
           ))}
@@ -318,29 +374,34 @@ function OverviewSection({
             {riskZones.length === 0 ? (
               <EmptyState icon={Layers} msg="No historical risk zones in current radius" />
             ) : (
-              <div className="risk-horizon">
-                <div className="rh-spine" />
-                {horizonItems.map((item, i) => (
-                  <div key={i} className="rh-row">
-                    <div className="rh-depth">{fmtN(item.depth)}</div>
-                    <div className="rh-dot" style={{
-                      background: item.color,
-                      ...(item.severity === 'active' ? { color: item.color } : {}),
-                    }} />
-                    <div className="rh-card" style={{
-                      borderLeft: `2px solid ${item.color}`,
-                      ...(item.severity === 'active' ? { background: 'rgba(34,211,238,0.06)', borderLeftColor: 'var(--cyan)' } : {}),
-                    }}>
-                      <div className="rh-event-type" style={{ color: item.color }}>{item.label}</div>
-                      {item.interval && <div className="rh-interval">{item.interval}</div>}
+              <div className="risk-horizon-v2">
+                <div className="rh2-axis" />
+                {horizonItems.map((item, i) => {
+                  const isActive = item.severity === 'active';
+                  return (
+                    <div key={i} className={`rh2-row ${isActive ? 'rh2-active-row' : ''}`}>
+                      <div className="rh2-depth">{fmtN(item.depth)} m</div>
+                      <div className={`rh2-tick ${isActive ? 'active' : ''}`} />
+                      {isActive ? (
+                        <div className="rh2-bit-label">
+                          <div className="rh2-bit-dot" />
+                          CURRENT BIT
+                        </div>
+                      ) : (
+                        <div className="rh2-event">
+                          <div className="rh2-band" style={{ background: item.color }} />
+                          <div className="rh2-event-label" style={{ color: item.color }}>{item.label}</div>
+                        </div>
+                      )}
                     </div>
-                  </div>
-                ))}
-                <div className="rh-row">
-                  <div className="rh-depth" style={{ color: 'var(--text-5)' }}>{fmtN(depthMax)}</div>
-                  <div className="rh-dot" style={{ background: 'var(--border-2)' }} />
-                  <div className="rh-card" style={{ opacity: 0.4 }}>
-                    <div className="rh-event-type" style={{ color: 'var(--text-4)' }}>End of Horizon</div>
+                  );
+                })}
+                <div className="rh2-row">
+                  <div className="rh2-depth text-muted">{fmtN(depthMax)} m</div>
+                  <div className="rh2-tick" />
+                  <div className="rh2-event">
+                    <div className="rh2-band" style={{ background: 'var(--border-2)' }} />
+                    <div className="rh2-event-label text-muted">END OF HORIZON</div>
                   </div>
                 </div>
               </div>
@@ -423,16 +484,18 @@ function OverviewSection({
                       nw.relevant_events.length > 0 && 'EVENTS',
                     ].filter(Boolean) as string[];
                     return (
-                      <div key={nw.well.well_id} className="analog-row">
-                        <div className="analog-id">{nw.well.well_id}</div>
+                      <React.Fragment key={nw.well.well_id}>
+                        <div className="analog-row">
+                          <div className="analog-id">{nw.well.well_id}</div>
                         <div className="analog-bar-track">
                           <div className="analog-bar-fill" style={{ width: `${pct}%`, background: col }} />
                         </div>
                         <div className="analog-pct" style={{ color: col }}>{pct}%</div>
-                        <div className="analog-tags">
-                          {tags.slice(0, 2).map(t => <span key={t} className="analog-tag">{t}</span>)}
-                        </div>
                       </div>
+                      <div className="analog-tags" style={{ paddingLeft: 60, marginTop: -4 }}>
+                        {tags.map(t => <span key={t} className="badge b-gray" style={{ fontSize: 9, padding: '2px 4px' }}>[{t}]</span>)}
+                      </div>
+                    </React.Fragment>
                     );
                   })
               }
@@ -517,16 +580,20 @@ function OverviewSection({
 // ══════════════════════════════════════════════════════════════════════
 // GEOSPATIAL SECTION
 // ══════════════════════════════════════════════════════════════════════
-function GeospatialSection({ activeWell, nearbyWells, radius, onRadiusChange }: {
-  activeWell: Well | null; nearbyWells: NearbyWell[];
+function GeospatialSection({ activeWell, nearbyWells, risks, radius, onRadiusChange }: {
+  activeWell: Well | null; nearbyWells: NearbyWell[]; risks: RiskPrediction[];
   radius: number; onRadiusChange: (r: number) => void;
 }) {
-  const [selected, setSelected] = useState<NearbyWell | null>(null);
+  const [selectedWell, setSelectedWell] = useState<NearbyWell | null>(null);
+  const [selectedRisk, setSelectedRisk] = useState<RiskPrediction | null>(null);
   if (!activeWell) return <Spinner />;
 
   return (
     <div className="section-enter" style={{ display: 'flex', gap: 14, height: 'calc(100vh - 120px)', minHeight: 540 }}>
       <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: 10 }}>
+        <WorkspaceHeader
+          title="GEOSPATIAL ANALYSIS"
+          subtitle="Spatial context · nearby wells · analog relevance" />
         {/* Radius controls */}
         <div className="panel" style={{ padding: '10px 16px' }}>
           <div className="flex items-center gap-4">
@@ -556,10 +623,13 @@ function GeospatialSection({ activeWell, nearbyWells, radius, onRadiusChange }: 
               </div>
             </Popup>
           </Marker>
-          {nearbyWells.map(nw => (
+          {nearbyWells.map(nw => {
+            const isHighlighted = selectedRisk ? selectedRisk.supporting_wells.includes(nw.well.well_id) : true;
+            return (
             <Marker key={nw.well.well_id} position={[nw.well.latitude, nw.well.longitude]}
-              icon={nw.relevance.label === 'HIGH' ? HIGH_ICON : nw.relevance.label === 'MEDIUM' ? MED_ICON : LOW_ICON}
-              eventHandlers={{ click: () => setSelected(nw) }}>
+              icon={!isHighlighted ? LOW_ICON : nw.relevance.label === 'HIGH' ? HIGH_ICON : nw.relevance.label === 'MEDIUM' ? MED_ICON : LOW_ICON}
+              opacity={isHighlighted ? 1 : 0.4}
+              eventHandlers={{ click: () => { setSelectedWell(nw); setSelectedRisk(null); } }}>
               <Popup>
                 <div style={{ fontFamily: 'Inter, sans-serif' }}>
                   <div style={{ fontWeight: 700, color: 'var(--cyan)', marginBottom: 4 }}>{nw.well.well_id}</div>
@@ -568,43 +638,66 @@ function GeospatialSection({ activeWell, nearbyWells, radius, onRadiusChange }: 
                 </div>
               </Popup>
             </Marker>
-          ))}
+            );
+          })}
         </MapContainer>
+        
+        {/* Risk overlay or list below controls */}
+        {risks.length > 0 && (
+          <div className="panel" style={{ marginTop: 10 }}>
+            <div className="panel-header">
+              <div className="panel-title"><Shield size={11} style={{ color: 'var(--orange)' }} />Select Risk to Highlight Analog Wells</div>
+            </div>
+            <div style={{ display: 'flex', gap: 10, padding: '10px 16px', overflowX: 'auto' }}>
+              {risks.map(r => (
+                <button key={r.risk_type} 
+                  className="btn" 
+                  style={{
+                    border: `1px solid ${selectedRisk === r ? riskColor(r.risk_level) : 'var(--border-2)'}`,
+                    background: selectedRisk === r ? `${riskColor(r.risk_level)}20` : 'transparent',
+                  }}
+                  onClick={() => { setSelectedRisk(selectedRisk === r ? null : r); setSelectedWell(null); }}>
+                  {r.risk_type.replace(/_/g, ' ')} ({r.supporting_wells.length} wells)
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Side panel */}
       <div style={{ width: 300, flexShrink: 0 }}>
-        {selected ? (
+        {selectedWell ? (
           <div className="panel" style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
             <div className="panel-header">
               <div>
-                <div className="mono text-cyan font-bold" style={{ fontSize: 14 }}>{selected.well.well_id}</div>
-                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>{selected.distance_km.toFixed(2)} km · {selected.well.field}</div>
+                <div className="mono text-cyan font-bold" style={{ fontSize: 14 }}>{selectedWell.well.well_id}</div>
+                <div style={{ fontSize: 10, color: 'var(--text-4)' }}>{selectedWell.distance_km.toFixed(2)} km · {selectedWell.well.field}</div>
               </div>
-              <button className="drawer-close" onClick={() => setSelected(null)}>×</button>
+              <button className="drawer-close" onClick={() => setSelectedWell(null)}>×</button>
             </div>
             <div style={{ flex: 1, overflowY: 'auto', padding: 14, display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <span className={`badge ${selected.relevance.label === 'HIGH' ? 'b-amber' : selected.relevance.label === 'MEDIUM' ? 'b-cyan' : 'b-gray'}`}>
-                {selected.relevance.label} RELEVANCE
+              <span className={`badge ${selectedWell.relevance.label === 'HIGH' ? 'b-amber' : selectedWell.relevance.label === 'MEDIUM' ? 'b-cyan' : 'b-gray'}`}>
+                {selectedWell.relevance.label} RELEVANCE
               </span>
               <div className="g2" style={{ gap: 8 }}>
                 <div className="metric-card">
                   <div className="metric-label">Distance</div>
-                  <div className="metric-value cyan" style={{ fontSize: 16 }}>{selected.distance_km.toFixed(1)}<span className="metric-unit">km</span></div>
+                  <div className="metric-value cyan" style={{ fontSize: 16 }}>{selectedWell.distance_km.toFixed(1)}<span className="metric-unit">km</span></div>
                 </div>
                 <div className="metric-card">
                   <div className="metric-label">Formation</div>
-                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--teal)', marginTop: 4 }}>{selected.well.formation}</div>
+                  <div style={{ fontSize: 12, fontWeight: 600, color: 'var(--teal)', marginTop: 4 }}>{selectedWell.well.formation}</div>
                 </div>
               </div>
               <div>
                 <SectionTitle icon={Activity}>Relevance Breakdown</SectionTitle>
                 <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 6 }}>
                   {[
-                    ['Spatial', selected.relevance.spatial_score],
-                    ['Depth', selected.relevance.depth_score],
-                    ['Formation', selected.relevance.formation_score],
-                    ['Event Density', selected.relevance.event_density],
+                    ['Spatial', selectedWell.relevance.spatial_score],
+                    ['Depth', selectedWell.relevance.depth_score],
+                    ['Formation', selectedWell.relevance.formation_score],
+                    ['Event Density', selectedWell.relevance.event_density],
                   ].map(([l, v]) => (
                     <div key={l as string}>
                       <div className="flex justify-between" style={{ fontSize: 10, marginBottom: 3 }}>
@@ -618,11 +711,11 @@ function GeospatialSection({ activeWell, nearbyWells, radius, onRadiusChange }: 
                   ))}
                 </div>
               </div>
-              {selected.relevant_events.length > 0 && (
+              {selectedWell.relevant_events.length > 0 && (
                 <div>
-                  <SectionTitle icon={FileText}>Historical Events ({selected.relevant_events.length})</SectionTitle>
+                  <SectionTitle icon={FileText}>Historical Events ({selectedWell.relevant_events.length})</SectionTitle>
                   <div style={{ marginTop: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
-                    {selected.relevant_events.map(e => (
+                    {selectedWell.relevant_events.map(e => (
                       <div key={e.event_id} style={{ padding: '10px 12px', background: 'var(--surface-2)', borderRadius: 'var(--r-md)', borderLeft: `2px solid ${eventColor(e.event_type)}` }}>
                         <div className="flex justify-between" style={{ marginBottom: 4 }}>
                           <span className={eventTypeBadge(e.event_type)}>{e.event_type.replace(/_/g, ' ')}</span>
@@ -659,6 +752,10 @@ function RiskSection({ activeWell, risks, alerts, nearbyWells, events }: {
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader
+        title="RISK INTELLIGENCE"
+        subtitle="Depth-aligned historical risk and supporting evidence" />
+      <WorkspaceHeader title="RISK INTELLIGENCE" subtitle="Depth-aligned historical risk and supporting evidence" />
       {/* Alerts */}
       {alerts.map(a => (
         <div key={a.alert_id} className={`alert-strip ${a.severity === 'CRITICAL' ? 'critical' : ''}`}>
@@ -738,40 +835,42 @@ function RiskSection({ activeWell, risks, alerts, nearbyWells, events }: {
           {risks.map((r, i) => (
             <div key={i} className="risk-card">
               <div className="risk-card-header" style={{ borderTop: `2px solid ${riskColor(r.risk_level)}` }}>
-                <div>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
                   <div className="risk-card-type" style={{ color: riskColor(r.risk_level) }}>{r.risk_type.replace(/_/g, ' ')}</div>
-                  <div style={{ fontSize: 10, color: 'var(--text-4)', marginTop: 2 }}>Zone: {fmtN(r.interval_start)}–{fmtN(r.interval_end)} m</div>
+                  <div className="flex gap-1">
+                    <span className={riskBadgeClass(r.risk_level)}>{r.risk_level}</span>
+                    {r.ml_probability != null && <span className="badge b-purple">ML {r.ml_probability}%</span>}
+                  </div>
                 </div>
-                <div style={{ textAlign: 'right' }}>
-                  <div className="risk-card-score" style={{ color: riskColor(r.risk_level) }}>{r.risk_score}</div>
-                  <div style={{ fontSize: 9, color: 'var(--text-4)' }}>/ 100</div>
+                <div style={{ display: 'flex', alignItems: 'baseline', marginTop: 12 }}>
+                  <span className="mono" style={{ fontSize: 24, fontWeight: 700, color: riskColor(r.risk_level), lineHeight: 1 }}>{r.risk_score}</span>
+                  <span style={{ fontSize: 12, color: 'var(--text-4)' }}> / 100</span>
                 </div>
               </div>
               <div className="risk-card-body">
+                <div style={{ marginBottom: 16 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 2 }}>RISK ZONE</div>
+                  <div className="mono" style={{ fontSize: 13, color: 'var(--text)' }}>{fmtN(r.interval_start)}–{fmtN(r.interval_end)} m</div>
+                </div>
                 {[
-                  ['Supporting Wells', String(r.supporting_wells.length)],
-                  ['Evidence', r.evidence_strength],
-                  ['Formation', nearbyWells[0]?.well.formation ?? '—'],
+                  ['SUPPORTING WELLS', String(r.supporting_wells.length)],
+                  ['EVIDENCE', r.evidence_strength],
+                  ['FORMATION MATCH', nearbyWells[0]?.well.formation ?? '—'],
                 ].map(([k, v]) => (
-                  <div key={k} className="risk-row">
-                    <span className="risk-row-label">{k}</span>
+                  <div key={k} className="risk-row" style={{ padding: '3px 0' }}>
+                    <span style={{ fontSize: 9, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700 }}>{k}</span>
                     <span className="risk-row-val">{v}</span>
                   </div>
                 ))}
-                <div className="flex gap-2" style={{ marginTop: 6 }}>
-                  <span className={riskBadgeClass(r.risk_level)}>{r.risk_level}</span>
-                  {r.ml_probability != null && <span className="badge b-purple">ML: {r.ml_probability}%</span>}
+                
+                <div style={{ marginTop: 16, marginBottom: 16 }}>
+                  <div style={{ fontSize: 9, color: 'var(--text-4)', textTransform: 'uppercase', letterSpacing: 1, fontWeight: 700, marginBottom: 4 }}>WHY</div>
+                  <div className="risk-explanation">{r.explanation}</div>
                 </div>
-                <div className="risk-explanation">{r.explanation}</div>
-                {r.contributing_factors.slice(0, 3).map((f, j) => (
-                  <div key={j} className="factor-row">
-                    <div className="factor-dot" />
-                    <div><span className="factor-name">{f.factor}: </span><span className="factor-detail">{f.detail}</span></div>
-                  </div>
-                ))}
-                <button className="btn btn-primary" style={{ width: '100%', marginTop: 10, justifyContent: 'center' }}
+
+                <button className="btn btn-primary" style={{ width: '100%', justifyContent: 'center' }}
                   onClick={() => setDrawerRisk(r)}>
-                  View Evidence
+                  [ VIEW EVIDENCE ]
                 </button>
               </div>
             </div>
@@ -799,6 +898,7 @@ function WellsSection({ wells }: { wells: Well[] }) {
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader title="WELL EXPLORER" subtitle="Historical and active-well context" />
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title"><Database size={11} style={{ color: 'var(--cyan)' }} />Well Explorer</div>
@@ -857,6 +957,7 @@ function KnowledgeSection({ events }: { events: WellEvent[] }) {
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader title="KNOWLEDGE BASE" subtitle="Institutional drilling memory and source-linked events" />
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title"><BookOpen size={11} style={{ color: 'var(--cyan)' }} />Institutional Drilling Memory</div>
@@ -953,6 +1054,7 @@ function SearchSection({ activeWellId }: { activeWellId: string }) {
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader title="NWIS QUERY CONSOLE" subtitle="Evidence-grounded drilling intelligence retrieval" />
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title"><Search size={11} style={{ color: 'var(--cyan)' }} />Technical Query Console</div>
@@ -1036,6 +1138,7 @@ function AnomalySection({ activeWellId }: { activeWellId: string }) {
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader title="ANOMALY DETECTION" subtitle="Statistical telemetry anomalies vs historical baseline" />
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title"><Activity size={11} style={{ color: 'var(--orange)' }} />Parameter Anomaly Detection</div>
@@ -1101,6 +1204,7 @@ function AuditSection({ activeWellId, radius, simDepth }: { activeWellId: string
 
   return (
     <div className="section-enter" style={{ display: 'flex', flexDirection: 'column', gap: 14 }}>
+      <WorkspaceHeader title="DECISION AUDIT REPORT" subtitle="Engine provenance and model integrity" />
       <div className="panel">
         <div className="panel-header">
           <div className="panel-title"><FileText size={11} style={{ color: 'var(--cyan)' }} />Decision Audit Report</div>
@@ -1317,19 +1421,37 @@ export default function App() {
               </button>
             ))}
           </div>
+          <div className="nav-group" style={{ marginTop: 12 }}>
+            <div className="nav-group-label">Diagnostics</div>
+            {DIAGNOSTICS.map(({ id, label, Icon }) => (
+              <button key={id} className={`nav-item ${section === id ? 'active' : ''}`} onClick={() => setSection(id)}>
+                <Icon size={14} />
+                {label}
+              </button>
+            ))}
+          </div>
         </nav>
 
         {/* System status */}
         <div className="sidebar-status">
           <div className="status-label">System Status</div>
           {[
-            'Well Data Feed', 'Spatial Engine', 'Risk Engine', 'Evidence Store',
-          ].map(s => (
-            <div key={s} className="status-row">
-              <div className="status-dot ok" />
-              <span>{s}</span>
-            </div>
-          ))}
+            { label: 'Well Data Feed', state: activeWell ? 'ACTIVE' : 'UNAVAILABLE' },
+            { label: 'Spatial Engine', state: nearbyWells.length > 0 ? 'READY' : 'DEGRADED' },
+            { label: 'Risk Engine', state: risks ? 'READY' : 'DEGRADED' },
+            { label: 'Evidence Store', state: events.length > 0 ? 'READY' : 'UNAVAILABLE' },
+          ].map(({ label, state }) => {
+            const statusClass = state === 'ACTIVE' || state === 'READY' ? 'ok' : state === 'DEGRADED' ? 'warn' : 'err';
+            return (
+              <div key={label} className="status-row">
+                <div className={`status-dot ${statusClass}`} />
+                <span>{label}</span>
+                <span style={{ marginLeft: 'auto', fontSize: 9, fontWeight: 700, color: `var(--${statusClass === 'ok' ? 'green' : statusClass === 'warn' ? 'amber' : 'red'})`, opacity: 0.8 }}>
+                  {state}
+                </span>
+              </div>
+            );
+          })}
         </div>
 
         {/* Depth simulation */}
@@ -1371,7 +1493,7 @@ export default function App() {
                   riskZones={riskZones} events={events} />
               )}
               {section === 'map' && (
-                <GeospatialSection activeWell={activeWell} nearbyWells={nearbyWells}
+                <GeospatialSection activeWell={activeWell} nearbyWells={nearbyWells} risks={risks}
                   radius={radius} onRadiusChange={setRadius} />
               )}
               {section === 'risk' && (
