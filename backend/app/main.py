@@ -14,10 +14,20 @@ from .services.search import search_knowledge
 from .services.anomaly_detector import detect_anomalies, AnomalyReport
 from .services.audit_report import generate_audit_report, AuditReport
 
+from contextlib import asynccontextmanager
+from .data.synthetic_data import generate_synthetic_data
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    # Initialize the synthetic database on startup (if empty)
+    generate_synthetic_data(reset=False)
+    yield
+
 app = FastAPI(
     title="NWIS API",
     description="Nearby Wells Intelligence System — Historical Similarity Risk Engine",
     version="2.0.0",
+    lifespan=lifespan,
 )
 
 cors_origins_env = os.getenv("NWIS_CORS_ORIGINS", "http://localhost:5173")
