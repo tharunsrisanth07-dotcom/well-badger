@@ -3,7 +3,7 @@ import { MapContainer, TileLayer, Marker, Circle, Popup, useMap } from 'react-le
 import 'leaflet/dist/leaflet.css';
 import L from 'leaflet';
 import {
-  Activity, BookOpen, Database, FileText,
+  Activity, Database, FileText,
   Globe, Layers, RefreshCw, Search,
   Shield, Zap, TriangleAlert, Play, ArrowRight, ArrowLeft, X
 } from 'lucide-react';
@@ -225,7 +225,7 @@ function SubsurfaceCanvas({ simDepth, activeWell, riskZones }: { simDepth: numbe
       ctx.fillRect(width * 0.5, scanY - 30, width * 0.5, 60);
 
       // ── Risk Markers ──
-      riskZones.slice(0, 3).forEach((rz, i) => {
+      riskZones.slice(0, 3).forEach((rz) => {
         const ry = bitY + (rz.interval_start - simDepth) * 0.6; // Scale relative to depth
         if (ry > 0 && ry < height) {
            ctx.beginPath();
@@ -599,7 +599,7 @@ function OverviewSection({
   const topRisk = risks[0];
 
   const horizonItems = [
-    { depth: simDepth, label: 'CURRENT BIT', isActive: true, color: 'var(--col-cyan)' },
+    { depth: simDepth, label: 'CURRENT BIT', isActive: true, color: 'var(--col-cyan)', interval: undefined as string | undefined },
     ...riskZones.map(z => ({
       depth: z.interval_start,
       label: z.risk_type.replace(/_/g, ' '),
@@ -781,7 +781,7 @@ function OverviewSection({
                       ) : (
                         <>
                           <span className="rh-event-name" style={{ color: item.color }}>{item.label}</span>
-                          {item.interval && <span className="rh-event-interval">{item.interval}</span>}
+                          {'interval' in item && item.interval && <span className="rh-event-interval">{item.interval}</span>}
                         </>
                       )}
                     </div>
@@ -947,13 +947,10 @@ function OverviewSection({
 // ══════════════════════════════════════════════════════════════════════
 // GEOSPATIAL SECTION
 // ══════════════════════════════════════════════════════════════════════
-function GeospatialSection({ activeWell, nearbyWells, risks, radius, onRadiusChange }: {
-  activeWell: Well | null; nearbyWells: NearbyWell[]; risks: RiskPrediction[];
+function GeospatialSection({ activeWell, nearbyWells, radius, onRadiusChange }: {
+  activeWell: Well | null; nearbyWells: NearbyWell[];
   radius: number; onRadiusChange: (r: number) => void;
 }) {
-  const [selectedWell, setSelectedWell] = useState<NearbyWell | null>(null);
-  const [highlightRisk, setHighlightRisk] = useState<RiskPrediction | null>(null);
-
   if (!activeWell) return <Spinner />;
 
   return (
@@ -981,14 +978,12 @@ function GeospatialSection({ activeWell, nearbyWells, risks, radius, onRadiusCha
               <Popup><strong style={{ color: '#ef4444' }}>● {activeWell.well_id}</strong><br />ACTIVE · {fmtDepth(activeWell.current_depth)}</Popup>
             </Marker>
             {nearbyWells.map(nw => {
-              const highlighted = highlightRisk ? highlightRisk.supporting_wells.includes(nw.well.well_id) : true;
               return (
                 <Marker
                   key={nw.well.well_id}
                   position={[nw.well.latitude, nw.well.longitude]}
-                  opacity={highlighted ? 1 : 0.3}
+                  opacity={1}
                   icon={nw.relevance.label === 'HIGH' ? HIGH_ICON : nw.relevance.label === 'MEDIUM' ? MED_ICON : LOW_ICON}
-                  eventHandlers={{ click: () => setSelectedWell(nw) }}
                 >
                   <Popup>
                     <strong style={{ color: '#22d3ee' }}>{nw.well.well_id}</strong><br />
@@ -1007,8 +1002,8 @@ function GeospatialSection({ activeWell, nearbyWells, risks, radius, onRadiusCha
 // ══════════════════════════════════════════════════════════════════════
 // RISK INTELLIGENCE SECTION
 // ══════════════════════════════════════════════════════════════════════
-function RiskSection({ activeWell, risks, alerts, nearbyWells, events }: {
-  activeWell: Well | null; risks: RiskPrediction[]; alerts: Alert[]; nearbyWells: NearbyWell[]; events: WellEvent[];
+function RiskSection({ activeWell, risks, events }: {
+  activeWell: Well | null; risks: RiskPrediction[]; events: WellEvent[];
 }) {
   const [drawerRisk, setDrawerRisk] = useState<RiskPrediction | null>(null);
 
@@ -1472,8 +1467,8 @@ export default function App() {
                   onStartDemo={() => setDemoActive(true)}
                 />
               )}
-              {section === 'map' && <GeospatialSection activeWell={activeWell} nearbyWells={nearbyWells} risks={risks} radius={radius} onRadiusChange={setRadius} />}
-              {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} alerts={alerts} nearbyWells={nearbyWells} events={events} />}
+              {section === 'map' && <GeospatialSection activeWell={activeWell} nearbyWells={nearbyWells} radius={radius} onRadiusChange={setRadius} />}
+              {section === 'risk' && <RiskSection activeWell={activeWell} risks={risks} events={events} />}
               {section === 'wells' && <WellsSection wells={allWells} events={events} />}
               {section === 'knowledge' && <KnowledgeSection events={events} />}
               {section === 'search' && <SearchSection activeWellId={activeWellId} initialQuery={searchQuery} />}
