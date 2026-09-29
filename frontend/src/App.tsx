@@ -1315,7 +1315,13 @@ export default function App() {
         setAllWells(res[6] as Well[]);
       }
     } catch (e: unknown) {
-      setError((e as Error).message || 'Failed to reach NWIS intelligence feed.');
+      const err = e as any;
+      let msg = err.message || 'Failed to reach NWIS intelligence feed.';
+      if (err.isAxiosError) {
+        if (err.response?.status === 404) msg = 'Unable to reach NWIS backend (404 Not Found). Check API_BASE_URL configuration.';
+        else if (err.code === 'ERR_NETWORK') msg = 'Unable to connect to NWIS backend. Verify CORS or network connectivity.';
+      }
+      setError(msg);
     } finally { setLoading(false); }
   }, [activeWellId, radius, simDepth]);
 
@@ -1420,29 +1426,29 @@ export default function App() {
       {/* ══ LAYER 4: LIVE STATUS STRIP ══ */}
       <div className="status-strip">
         <div className="ss-item">
-          <span className={`ss-dot ${activeWell ? 'ok' : 'err'}`} />
-          <span>ERTMAC FEED: {activeWell ? 'ACTIVE' : 'UNAVAILABLE'}</span>
+          <span className={`ss-dot ${error ? 'err' : (activeWell ? 'ok' : 'warn')}`} />
+          <span>FEED: {error ? 'ERROR' : (activeWell ? 'SIMULATED' : 'WAITING')}</span>
         </div>
         <div className="ss-sep" />
         <div className="ss-item">
-          <span className="ss-dot ok" />
+          <span className={`ss-dot ${error ? 'err' : 'ok'}`} />
           <span className="mono">{activeWellId} · {fmtN(simDepth)} m</span>
           <span style={{ color: 'var(--col-teal)', marginLeft: 4 }}>· {activeWell?.current_formation}</span>
         </div>
         <div className="ss-sep" />
         <div className="ss-item">
-          <span className={`ss-dot ${nearbyWells.length > 0 ? 'ok' : 'warn'}`} />
-          <span>SPATIAL ENGINE: {nearbyWells.length} OFFSET WELLS</span>
+          <span className={`ss-dot ${error ? 'err' : (nearbyWells.length > 0 ? 'ok' : 'warn')}`} />
+          <span>SPATIAL ENGINE: {error ? 'UNAVAILABLE' : `${nearbyWells.length} OFFSET WELLS`}</span>
         </div>
         <div className="ss-sep" />
         <div className="ss-item">
-          <span className={`ss-dot ${risks.length > 0 ? (topRiskLevel === 'CRITICAL' ? 'err' : 'warn') : 'ok'}`} />
-          <span>RISK ENGINE: {topRiskLevel}</span>
+          <span className={`ss-dot ${error ? 'err' : (risks.length > 0 ? (topRiskLevel === 'CRITICAL' ? 'err' : 'warn') : 'ok')}`} />
+          <span>RISK ENGINE: {error ? 'OFFLINE' : topRiskLevel}</span>
         </div>
         <div className="ss-sep" />
         <div className="ss-item">
-          <span className={`ss-dot ${events.length > 0 ? 'ok' : 'warn'}`} />
-          <span>EVIDENCE STORE: {events.length > 0 ? 'READY' : 'LOADING'}</span>
+          <span className={`ss-dot ${error ? 'err' : (events.length > 0 ? 'ok' : 'warn')}`} />
+          <span>EVIDENCE STORE: {error ? 'ERROR' : (events.length > 0 ? 'READY' : 'LOADING')}</span>
         </div>
         <div className="ss-time mono">UPDATED {utcTime}</div>
       </div>
