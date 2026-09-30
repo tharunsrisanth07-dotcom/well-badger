@@ -77,24 +77,24 @@ graph TD
 
     %% Nodes
     subgraph Client Layer [🌐 Presentation Layer - React/Vite]
-        UI[Command Center UI<br/>(Tailwind + Lucide)]:::frontend
-        MAP[Spatial Map Engine<br/>(React-Leaflet)]:::frontend
+        UI["Command Center UI<br/>(Tailwind + Lucide)"]:::frontend
+        MAP["Spatial Map Engine<br/>(React-Leaflet)"]:::frontend
     end
 
     subgraph API Layer [⚡ API Gateway - FastAPI]
-        ROUTER(RESTful Endpoints & CORS):::backend
-        TELEMETRY(Telemetry Processor):::backend
-        GEO(Haversine Distance Engine):::backend
-        AUDIT(Explainable Audit Generator):::backend
+        ROUTER("RESTful Endpoints & CORS"):::backend
+        TELEMETRY("Telemetry Processor"):::backend
+        GEO("Haversine Distance Engine"):::backend
+        AUDIT("Explainable Audit Generator"):::backend
     end
 
     subgraph Intelligence Layer [🧠 Machine Learning]
-        RF((Random Forest<br/>Risk Predictor)):::ml
-        ANOMALY((Z-Score<br/>Anomaly Detector)):::ml
+        RF(("Random Forest<br/>Risk Predictor")):::ml
+        ANOMALY(("Z-Score<br/>Anomaly Detector")):::ml
     end
 
     subgraph Persistence Layer [💾 Data Storage]
-        DB[(SQLite / Knowledge Base)]:::database
+        DB[("SQLite / Knowledge Base")]:::database
     end
 
     %% Flow
